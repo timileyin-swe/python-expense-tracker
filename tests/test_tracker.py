@@ -1,0 +1,81 @@
+import csv
+import io
+import tempfile
+import unittest
+from contextlib import redirect_stdout, redirect_stderr
+from pathlib import Path
+from expense_tracker.core import ExpenseStore, money_to_kobo
+from expense_tracker.__main__ import main
+
+
+class TrackerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.db = Path(self.temp.name) / "expenses.db"
+        self.store = ExpenseStore(self.db)
+
+    def test_exact_money(self):
+        self.assertEqual(money_to_kobo("0.29"), 29)
+        self.assertEqual(money_to_kobo("1000.50"), 100050)
+
+    def test_invalid_money(self):
+        for value in ("0", "-1", "nan", "Infinity", "abc", "1.001", "1e100"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                money_to_kobo(value)
+
+    def test_validation(self):
+        for category, day in (("", "2026-10-12"), ("food", "2026-02-30"), ("food", "20261012")):
+            with self.subTest(category=category, day=day), self.assertRaises(ValueError):
+                self.store.add("1", category, day)
+        self.assertEqual(len(self.store.list()), 0)
+
+    def test_persistence_and_summary(self):
+        self.store.add("0.10", " Food ", "2026-10-01")
+        self.store.add("0.20", "food", "2026-10-02")
+        self.store.add("50", "transport", "2026-09-01")
+        reopened = ExpenseStore(self.db)
+        self.assertEqual(reopened.summary("2026-10"), {"food": 30})
+        self.assertEqual(len(reopened.list()), 3)
+        self.assertEqual(reopened.list()[0]["spent_on"], "2026-10-02")
+
+    def test_invalid_month(self):
+        for value in ("2026-13", "202610", "2026-1"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.store.list(value)
+
+    def test_sql_parameters_preserve_text(self):
+        self.store.add("10", "food", "2026-10-01", "'); DROP TABLE expenses;--")
+        self.assertEqual(len(self.store.list()), 1)
+
+    def test_export_escaping_and_exact_amount(self):
+        self.store.add("12.50", "food", "2026-10-01", '=SUM(1,2)')
+        path = Path(self.temp.name) / "export.csv"
+        self.assertEqual(self.store.export(path), 1)
+        with path.open(newline="", encoding="utf-8") as handle:
+            row = list(csv.DictReader(handle))[0]
+        self.assertEqual(row["amount_ngn"], "12.50")
+        self.assertEqual(row["note"], "'=SUM(1,2)")
+
+    def test_delete_and_missing_record(self):
+        record_id = self.store.add("10", "food", "2026-10-01")
+        self.assertTrue(self.store.delete(record_id))
+        self.assertFalse(self.store.delete(record_id))
+
+    def test_cli_requires_delete_confirmation(self):
+        record_id = self.store.add("10", "food", "2026-10-01")
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exc:
+            main(["--db", str(self.db), "delete", str(record_id)])
+        self.assertEqual(exc.exception.code, 2)
+        self.assertEqual(len(self.store.list()), 1)
+
+    def test_cli_add_and_summary(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            main(["--db", str(self.db), "add", "1500", "food", "--date", "2026-10-12"])
+            main(["--db", str(self.db), "summary", "--month", "2026-10"])
+        self.assertIn("TOTAL: NGN 1,500.00", output.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()
