@@ -6,6 +6,14 @@ from pathlib import Path
 from .core import ExpenseStore, format_money
 
 
+def format_expense(row):
+    """Build the single-line representation used by list and show."""
+    return (
+        f"#{row['id']} | {row['spent_on']} | "
+        f"{format_money(row['amount_kobo'])} | {row['category']} | {row['note']}"
+    )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Track personal expenses in NGN.")
     parser.add_argument("--db", default=str(Path.home() / ".expense-tracker" / "expenses.db"))
@@ -15,6 +23,8 @@ def main(argv=None):
     add.add_argument("category")
     add.add_argument("--date", default=date.today().isoformat())
     add.add_argument("--note", default="")
+    show = commands.add_parser("show", help="Show one expense by ID")
+    show.add_argument("id", type=int)
     for name in ("list", "summary", "export"):
         command = commands.add_parser(name)
         command.add_argument("--month", help="Filter using YYYY-MM")
@@ -29,12 +39,17 @@ def main(argv=None):
         if args.command == "add":
             record_id = store.add(args.amount, args.category, args.date, args.note)
             print(f"Added expense #{record_id}.")
+        elif args.command == "show":
+            row = store.get(args.id)
+            if row is None:
+                parser.error("Expense ID not found.")
+            print(format_expense(row))
         elif args.command == "list":
             rows = store.list(args.month)
             if not rows:
                 print("No expenses found.")
             for row in rows:
-                print(f"#{row['id']} | {row['spent_on']} | {format_money(row['amount_kobo'])} | {row['category']} | {row['note']}")
+                print(format_expense(row))
         elif args.command == "summary":
             totals = store.summary(args.month)
             for category, kobo in totals.items():

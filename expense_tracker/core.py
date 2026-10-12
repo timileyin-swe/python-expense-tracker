@@ -90,6 +90,15 @@ class ExpenseStore:
             )
             return cursor.lastrowid
 
+    def get(self, expense_id):
+        """Return one expense by ID, or None when no matching row exists."""
+        if isinstance(expense_id, bool) or not isinstance(expense_id, int) or expense_id <= 0:
+            raise ValueError("Expense ID must be a positive integer.")
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM expenses WHERE id=?", (expense_id,)
+            ).fetchone()
+
     def list(self, month=None):
         if month is not None:
             valid_month(month)

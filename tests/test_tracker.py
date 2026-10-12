@@ -39,6 +39,16 @@ class TrackerTests(unittest.TestCase):
         self.assertEqual(len(reopened.list()), 3)
         self.assertEqual(reopened.list()[0]["spent_on"], "2026-10-02")
 
+    def test_get_existing_missing_and_invalid_id(self):
+        record_id = self.store.add("25.50", "data", "2026-10-12", "Night plan")
+        row = self.store.get(record_id)
+        self.assertEqual(row["amount_kobo"], 2550)
+        self.assertEqual(row["category"], "data")
+        self.assertIsNone(self.store.get(record_id + 1))
+        for invalid_id in (0, -1, True, "1"):
+            with self.subTest(invalid_id=invalid_id), self.assertRaises(ValueError):
+                self.store.get(invalid_id)
+
     def test_invalid_month(self):
         for value in ("2026-13", "202610", "2026-1"):
             with self.subTest(value=value), self.assertRaises(ValueError):
@@ -75,6 +85,19 @@ class TrackerTests(unittest.TestCase):
             main(["--db", str(self.db), "add", "1500", "food", "--date", "2026-10-12"])
             main(["--db", str(self.db), "summary", "--month", "2026-10"])
         self.assertIn("TOTAL: NGN 1,500.00", output.getvalue())
+
+    def test_cli_show_and_missing_id(self):
+        record_id = self.store.add("1500", "food", "2026-10-12", "Lunch")
+        output = io.StringIO()
+        with redirect_stdout(output):
+            main(["--db", str(self.db), "show", str(record_id)])
+        self.assertEqual(
+            output.getvalue().strip(),
+            f"#{record_id} | 2026-10-12 | NGN 1,500.00 | food | Lunch",
+        )
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exc:
+            main(["--db", str(self.db), "show", "999"])
+        self.assertEqual(exc.exception.code, 2)
 
 
 if __name__ == "__main__":

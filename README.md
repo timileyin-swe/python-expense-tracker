@@ -1,20 +1,28 @@
 # Python Expense Tracker
 
-A local command-line application for recording NGN expenses, filtering by month,
-viewing category totals, and exporting CSV files. Built as a learning portfolio
-project using Python's standard library; no external packages are required.
+A local command-line application for recording NGN expenses, finding one expense
+by ID, filtering by month, viewing category totals, and exporting CSV files. Built
+as a learning portfolio project using Python's standard library; no external
+packages are required.
 
 ## Quick start
 
-Install Python 3.10 or newer, clone this repository, and open a terminal in its folder.
-On Windows, replace `python` with `py` if necessary.
+Install Python 3.10 or newer, clone this repository, and open a terminal in its
+folder. On Windows, replace `python` with `py` if necessary.
 
 ```sh
 python -m expense_tracker add 1500 food --date 2026-10-12 --note "Lunch"
 python -m expense_tracker add 800 transport --date 2026-10-12
+python -m expense_tracker show 1
 python -m expense_tracker list
 python -m expense_tracker summary --month 2026-10
 python -m expense_tracker export expenses.csv --month 2026-10
+```
+
+Example `show` result:
+
+```text
+#1 | 2026-10-12 | NGN 1,500.00 | food | Lunch
 ```
 
 Example summary:
@@ -32,9 +40,14 @@ All amounts use NGN; currencies cannot be mixed.
 ## Design
 
 - `argparse` turns terminal input into commands.
-- Validation rejects invalid dates, nonpositive amounts, and fractional kobo.
+- Validation rejects invalid dates, nonpositive amounts, fractional kobo, and
+  invalid IDs.
 - `Decimal` converts decimal amounts to integer kobo for exact storage and sums.
-- SQLite provides transactional persistence; parameterized SQL separates data from SQL.
+- SQLite provides transactional persistence; parameterized SQL separates data
+  from SQL.
+- `ExpenseStore.get()` returns one row or `None`, while the CLI decides how to
+  present a missing record to a user.
+- `format_expense()` gives the `list` and `show` commands one shared output format.
 - CSV text fields are protected against common spreadsheet formula prefixes.
 - Deletion requires explicit confirmation: `python -m expense_tracker delete 1 --yes`.
 
@@ -44,13 +57,16 @@ All amounts use NGN; currencies cannot be mixed.
 python -m unittest discover -s tests -v
 ```
 
-Tests use temporary databases and cover persistence, exact money, invalid input,
-monthly totals, export, SQL-looking notes, deletion confirmation, and CLI commands.
+The current suite contains 12 tests. It uses temporary databases and covers
+persistence, exact money, invalid input, monthly totals, single-record lookup,
+CSV export, SQL-looking notes, deletion confirmation, and CLI commands.
 
 ## Learn the project
 
-Read [the complete study guide](docs/STUDY_GUIDE.md), then run its exercises.
-[The next-step plan](docs/NEXT_STEPS.md) tracks future work.
+Read [the complete study guide](docs/STUDY_GUIDE.md), then complete its practical
+exercises. [The development log](docs/DEVELOPMENT_LOG.md) separates completed,
+tested, pending, and blocked work. [The next-step plan](docs/NEXT_STEPS.md) lists
+future milestones without presenting them as finished features.
 
 ## Scope and limitations
 
