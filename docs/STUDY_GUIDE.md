@@ -1,4 +1,4 @@
-# Python Expense Tracker — Version 1.1 Study Guide
+# Python Expense Tracker — Version 1.2 Study Guide
 
 ## 1. What this project does
 
@@ -22,8 +22,8 @@ Install Python 3.10 or newer. Open a terminal in the downloaded or cloned projec
 folder. Use a disposable database while learning:
 
 ```sh
-python -m expense_tracker --db practice.db add 1500 food --date 2026-10-12 --note "Lunch"
-python -m expense_tracker --db practice.db add 800 transport --date 2026-10-12 --note "Bus"
+python -m expense_tracker --db practice.db add 4500 groceries --date 2026-10-13 --note "Rice and vegetables"
+python -m expense_tracker --db practice.db add 2000 data --date 2026-10-13 --note "Weekly mobile data"
 python -m expense_tracker --db practice.db show 1
 python -m expense_tracker --db practice.db list
 python -m expense_tracker --db practice.db summary --month 2026-10
@@ -35,7 +35,7 @@ On Windows, `py` can replace `python`. You must be inside the repository folder 
 Python can find the `expense_tracker` package. The global `--db` option goes before
 the command; command-specific arguments go after the command.
 
-The expected monthly total is NGN 2,300.00. Running the two `add` commands again
+The expected monthly total is NGN 6,500.00. Running the two `add` commands again
 creates two more records, because duplicate detection is not implemented.
 
 ## 3. Command behavior
@@ -76,7 +76,53 @@ terminal text -> argparse -> main() -> ExpenseStore -> SQLite file
 This separation is enough for a small project. A larger service would normally
 split request models, business services, repositories, migrations, and logging.
 
-## 5. What changed in Version 1.1
+## 5. What changed in Version 1.2
+
+Version 1.2 turns two documented input limits into executable contracts. No
+runtime function changed: `ExpenseStore.add()` already enforced the limits. The
+new work adds tests that prove both the last accepted value and first rejected
+value, then documents realistic commands that use a disposable database.
+
+### `test_category_length_boundaries()`
+
+This test constructs a 50-character category, surrounds it with spaces, and uses
+uppercase letters. `ExpenseStore.add()` trims and lowercases the value before
+checking its length, so the stored result is 50 lowercase characters. A second
+call supplies 51 characters and must raise the documented `ValueError`. The test
+then proves that the failed call did not add a row.
+
+### `test_note_length_boundaries()`
+
+This test follows the same boundary pattern for notes: a trimmed 500-character
+note is stored exactly, a 501-character note is rejected, and only the accepted
+record remains in the database.
+
+### Why exact boundaries matter
+
+Testing an ordinary short value does not prove that the maximum works. Testing
+only an oversized value does not prove that the code is not too strict. For a
+maximum `N`, the most informative examples are usually `N` and `N + 1`; adding
+`N - 1` can be useful when the rule is more complicated.
+
+The changed functions in this milestone are test methods, not production
+functions. That is still useful portfolio work: the tests reduce the chance that
+a later refactor silently changes a public validation rule.
+
+### Boundary execution trace
+
+For `maximum_category = "A" * 50`:
+
+1. The test calls `add()` with a leading and trailing space.
+2. `money_to_kobo()` and `valid_date()` validate the other fields.
+3. `category.strip().lower()` removes the spaces and produces 50 lowercase `a`
+   characters.
+4. `len(category) > 50` is false, so SQLite inserts the row.
+5. `get(record_id)` retrieves it and the test checks the normalized value.
+
+For `"b" * 51`, the length check is true. `add()` raises `ValueError` before the
+`INSERT`, and the final row-count assertion proves that no partial record appeared.
+
+## 6. What changed in Version 1.1
 
 ### `ExpenseStore.get(expense_id)`
 
@@ -118,9 +164,9 @@ Two tests were added:
 - storage lookup covers an existing ID, a missing ID, and invalid direct inputs;
 - CLI lookup covers exact printed output and the missing-ID exit status.
 
-The suite now has 12 tests.
+The suite had 12 tests at Version 1.1 and has 14 after Version 1.2.
 
-## 6. Execution trace: `show 1`
+## 7. Execution trace: `show 1`
 
 Assume expense 1 already exists.
 
@@ -132,27 +178,27 @@ Assume expense 1 already exists.
 6. SQLite receives fixed SQL plus a separate tuple `(1,)`.
 7. `fetchone()` returns one `sqlite3.Row`, or `None` if no row matches.
 8. `format_expense()` reads named columns such as `row["amount_kobo"]`.
-9. `format_money(150000)` produces `NGN 1,500.00`.
+9. `format_money(450000)` produces `NGN 4,500.00`.
 10. The CLI prints the completed line.
 
 Observed output from the tested practice run:
 
 ```text
-#1 | 2026-10-12 | NGN 1,500.00 | food | Lunch
+#1 | 2026-10-13 | NGN 4,500.00 | groceries | Rice and vegetables
 ```
 
 For `show 999`, the observed message was `Expense ID not found.` and the process
 returned status 2. That nonzero status lets scripts distinguish success from error.
 
-## 7. Trace an added expense
+## 8. Trace an added expense
 
-For `python -m expense_tracker --db practice.db add 1500 food`:
+For `python -m expense_tracker --db practice.db add 4500 groceries`:
 
 1. `parse_args()` creates a namespace containing command `add`, amount string
-   `"1500"`, category `"food"`, and today's local date unless `--date` is supplied.
+   `"4500"`, category `"groceries"`, and today's local date unless `--date` is supplied.
 2. `ExpenseStore(args.db)` initializes the table if necessary.
 3. `add()` calls `money_to_kobo()` and `valid_date()`.
-4. The amount becomes integer `150000` kobo, not floating-point `1500.0`.
+4. The amount becomes integer `450000` kobo, not floating-point `4500.0`.
 5. The category is trimmed and lowercased; the note is trimmed.
 6. SQLite executes a parameterized `INSERT` and generates the record ID.
 7. The transaction commits, `add()` returns the ID, and the CLI prints it.
@@ -160,7 +206,7 @@ For `python -m expense_tracker --db practice.db add 1500 food`:
 Predict each value before running the command. That is more useful than memorizing
 the final code.
 
-## 8. Core Python functions and decisions
+## 9. Core Python functions and decisions
 
 ### `money_to_kobo(value)`
 
@@ -186,7 +232,7 @@ formula. The function prefixes an apostrophe when a user-controlled category or
 note begins with such a character after whitespace. This is a conservative export
 defense; spreadsheet behavior still varies.
 
-## 9. Classes, state, and SQLite
+## 10. Classes, state, and SQLite
 
 `ExpenseStore` is a class. Each instance stores its database path in `self.path`.
 `self` means the particular object on which a method was called.
@@ -208,7 +254,7 @@ context handles transactions, and the helper closes each connection.
 All SQL values use `?` placeholders. Never replace them with string interpolation.
 A note that looks like SQL remains data rather than becoming a command.
 
-## 10. Tests and verified behavior
+## 11. Tests and verified behavior
 
 Run:
 
@@ -216,28 +262,31 @@ Run:
 python -m unittest discover -s tests -v
 ```
 
-The 2026-10-12 milestone run reported:
+The 2026-10-13 milestone run reported:
 
 ```text
-Ran 12 tests
+Ran 14 tests
 OK
 ```
 
 Tests use a fresh temporary folder and database for each test. They cover exact
-money conversion, rejected money and dates, persistence after reopening, sorting,
-monthly filtering and totals, single-record lookup, invalid IDs, SQL-looking text,
-CSV escaping, deletion, confirmation, and real CLI paths.
+money conversion, rejected money and dates, exact 50/51-character category and
+500/501-character note boundaries, persistence after reopening, sorting, monthly
+filtering and totals, single-record lookup, invalid IDs, SQL-looking text, CSV
+escaping, deletion, confirmation, and real CLI paths.
 
 A passing suite proves only the listed cases passed in that environment. It does
 not prove the absence of every bug, production performance, or security readiness.
 
-## 11. Current limitations
+## 12. Current limitations
 
 - Single local user; no accounts, authentication, or per-user authorization.
 - NGN only; the schema cannot safely mix currencies.
 - No update command, duplicate detection, undo, or audit history.
 - No atomic CSV import.
 - No schema migration tool.
+- Text limits use Python's `len()` after trimming. There is no Unicode
+  normalization or separate UTF-8 byte limit.
 - No encryption; anyone who can read the database file can read its contents.
 - CSV export overwrites the target path.
 - No API, browser interface, PostgreSQL, Docker, monitoring, or cloud deployment.
@@ -245,7 +294,19 @@ not prove the absence of every bug, production performance, or security readines
 
 These are scope boundaries, not hidden completed features.
 
-## 12. Interview questions and honest answers
+## 13. Interview questions and honest answers
+
+**Why test 50 and 51 characters instead of one ordinary category?**
+They sit on opposite sides of the stated maximum, so together they prove the
+inclusive boundary. An ordinary short category cannot detect an off-by-one bug.
+
+**Why check the database row count after a validation error?**
+It verifies more than the exception message: rejected input must not create a
+partial or hidden record.
+
+**Why was no production function changed in Version 1.2?**
+The behavior was already correct. Adding regression evidence was safer than
+rewriting working code simply to make a larger diff.
 
 **Why add `get()` instead of filtering `list()` in Python?**
 The database can find one primary-key row directly. The method also expresses the
@@ -276,7 +337,7 @@ and API integration tests. Those features are not implemented here.
 Development used AI assistance. A truthful answer should distinguish generated or
 assisted implementation from the code personally studied, changed, and tested.
 
-## 13. Hands-on exercises
+## 14. Hands-on exercises
 
 Do these locally; reading alone is not practical mastery.
 
@@ -296,10 +357,11 @@ to check your predictions and remove them afterward.
 Temporarily change `format_expense()` so it omits the category. Run the tests,
 identify the failing assertion, restore the code, and run the suite again.
 
-### Exercise D — Add one boundary test
+### Exercise D — Explore the boundary tests
 
-Write a test proving a 50-character category is accepted and a 51-character
-category is rejected. Do not change production code unless the test exposes a bug.
+Read `test_category_length_boundaries()` and predict every assertion. Then run only
+that test. Change the accepted input locally to 49 characters, rerun it, explain
+why the stored-value assertion fails, and restore the original test.
 
 ### Exercise E — Design before coding
 
@@ -307,9 +369,10 @@ Write pseudocode for `update ID --amount ... --category ...`. Decide what happen
 when no fields are provided, the ID is missing, or one new value is invalid. This
 prepares the next feature without pretending it is implemented.
 
-## 14. Readiness check
+## 15. Readiness check
 
-You understand Version 1.1 when you can run every command unaided, trace both
-`add` and `show`, explain why a missing row is different from an invalid ID,
-predict a monthly total, identify the database file, make a small local change,
-observe a relevant test fail, restore the behavior, and return the suite to green.
+You understand Version 1.2 when you can run every command unaided, trace both
+`add` and `show`, explain why 50 characters pass while 51 fail, distinguish a
+missing row from an invalid ID, predict a monthly total, identify the database
+file, make a small local change, observe a relevant test fail, restore the
+behavior, and return the suite to green.

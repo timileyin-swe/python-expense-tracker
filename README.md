@@ -11,26 +11,26 @@ Install Python 3.10 or newer, clone this repository, and open a terminal in its
 folder. On Windows, replace `python` with `py` if necessary.
 
 ```sh
-python -m expense_tracker add 1500 food --date 2026-10-12 --note "Lunch"
-python -m expense_tracker add 800 transport --date 2026-10-12
-python -m expense_tracker show 1
-python -m expense_tracker list
-python -m expense_tracker summary --month 2026-10
-python -m expense_tracker export expenses.csv --month 2026-10
+python -m expense_tracker --db practice.db add 4500 groceries --date 2026-10-13 --note "Rice and vegetables"
+python -m expense_tracker --db practice.db add 2000 data --date 2026-10-13 --note "Weekly mobile data"
+python -m expense_tracker --db practice.db show 1
+python -m expense_tracker --db practice.db list
+python -m expense_tracker --db practice.db summary --month 2026-10
+python -m expense_tracker --db practice.db export expenses.csv --month 2026-10
 ```
 
 Example `show` result:
 
 ```text
-#1 | 2026-10-12 | NGN 1,500.00 | food | Lunch
+#1 | 2026-10-13 | NGN 4,500.00 | groceries | Rice and vegetables
 ```
 
 Example summary:
 
 ```text
-food: NGN 1,500.00
-transport: NGN 800.00
-TOTAL: NGN 2,300.00
+data: NGN 2,000.00
+groceries: NGN 4,500.00
+TOTAL: NGN 6,500.00
 ```
 
 Data survives application restarts in `~/.expense-tracker/expenses.db`.
@@ -42,6 +42,8 @@ All amounts use NGN; currencies cannot be mixed.
 - `argparse` turns terminal input into commands.
 - Validation rejects invalid dates, nonpositive amounts, fractional kobo, and
   invalid IDs.
+- Categories are trimmed, lowercased, and limited to 50 characters. Notes are
+  trimmed and limited to 500 characters.
 - `Decimal` converts decimal amounts to integer kobo for exact storage and sums.
 - SQLite provides transactional persistence; parameterized SQL separates data
   from SQL.
@@ -57,9 +59,10 @@ All amounts use NGN; currencies cannot be mixed.
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains 12 tests. It uses temporary databases and covers
-persistence, exact money, invalid input, monthly totals, single-record lookup,
-CSV export, SQL-looking notes, deletion confirmation, and CLI commands.
+The current suite contains 14 tests. It uses temporary databases and covers
+persistence, exact money, invalid input, category and note length boundaries,
+monthly totals, single-record lookup, CSV export, SQL-looking notes, deletion
+confirmation, and CLI commands.
 
 ## Learn the project
 

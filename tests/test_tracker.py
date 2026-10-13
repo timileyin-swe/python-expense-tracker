@@ -30,6 +30,22 @@ class TrackerTests(unittest.TestCase):
                 self.store.add("1", category, day)
         self.assertEqual(len(self.store.list()), 0)
 
+    def test_category_length_boundaries(self):
+        maximum_category = "A" * 50
+        record_id = self.store.add("1", f" {maximum_category} ", "2026-10-13")
+        self.assertEqual(self.store.get(record_id)["category"], "a" * 50)
+        with self.assertRaisesRegex(ValueError, "1 to 50 characters"):
+            self.store.add("1", "b" * 51, "2026-10-13")
+        self.assertEqual(len(self.store.list()), 1)
+
+    def test_note_length_boundaries(self):
+        maximum_note = "N" * 500
+        record_id = self.store.add("1", "study", "2026-10-13", f" {maximum_note} ")
+        self.assertEqual(self.store.get(record_id)["note"], maximum_note)
+        with self.assertRaisesRegex(ValueError, "at most 500 characters"):
+            self.store.add("1", "study", "2026-10-13", "n" * 501)
+        self.assertEqual(len(self.store.list()), 1)
+
     def test_persistence_and_summary(self):
         self.store.add("0.10", " Food ", "2026-10-01")
         self.store.add("0.20", "food", "2026-10-02")
