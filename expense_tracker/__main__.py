@@ -7,7 +7,7 @@ from .core import ExpenseStore, format_money
 
 
 def format_expense(row):
-    """Build the single-line representation used by list and show."""
+    """Build the single-line representation used by list, show, and update."""
     return (
         f"#{row['id']} | {row['spent_on']} | "
         f"{format_money(row['amount_kobo'])} | {row['category']} | {row['note']}"
@@ -25,6 +25,12 @@ def main(argv=None):
     add.add_argument("--note", default="")
     show = commands.add_parser("show", help="Show one expense by ID")
     show.add_argument("id", type=int)
+    update = commands.add_parser("update", help="Change selected fields on one expense")
+    update.add_argument("id", type=int)
+    update.add_argument("--amount", help="New NGN amount")
+    update.add_argument("--category", help="New category")
+    update.add_argument("--date", dest="spent_on", help="New date using YYYY-MM-DD")
+    update.add_argument("--note", help="New note; pass an empty string to clear it")
     for name in ("list", "summary", "export"):
         command = commands.add_parser(name)
         command.add_argument("--month", help="Filter using YYYY-MM")
@@ -44,6 +50,17 @@ def main(argv=None):
             if row is None:
                 parser.error("Expense ID not found.")
             print(format_expense(row))
+        elif args.command == "update":
+            row = store.update(
+                args.id,
+                amount=args.amount,
+                category=args.category,
+                spent_on=args.spent_on,
+                note=args.note,
+            )
+            if row is None:
+                parser.error("Expense ID not found.")
+            print(f"Updated {format_expense(row)}")
         elif args.command == "list":
             rows = store.list(args.month)
             if not rows:

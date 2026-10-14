@@ -65,6 +65,36 @@ class TrackerTests(unittest.TestCase):
             with self.subTest(invalid_id=invalid_id), self.assertRaises(ValueError):
                 self.store.get(invalid_id)
 
+    def test_update_selected_fields_and_clear_note(self):
+        record_id = self.store.add("25.50", "data", "2026-10-12", "Night plan")
+        row = self.store.update(record_id, category=" Transport ", note="")
+        self.assertEqual(row["amount_kobo"], 2550)
+        self.assertEqual(row["category"], "transport")
+        self.assertEqual(row["spent_on"], "2026-10-12")
+        self.assertEqual(row["note"], "")
+        row = self.store.update(record_id, amount="99.95", spent_on="2026-10-14")
+        self.assertEqual(row["amount_kobo"], 9995)
+        self.assertEqual(row["category"], "transport")
+        self.assertEqual(row["spent_on"], "2026-10-14")
+        self.assertEqual(row["note"], "")
+
+    def test_update_rejects_invalid_or_missing_changes(self):
+        record_id = self.store.add("25.50", "data", "2026-10-12", "Night plan")
+        original = dict(self.store.get(record_id))
+        with self.assertRaisesRegex(ValueError, "at least one field"):
+            self.store.update(record_id)
+        invalid_changes = (
+            {"amount": "0"},
+            {"category": ""},
+            {"spent_on": "2026-02-30"},
+            {"note": "n" * 501},
+        )
+        for changes in invalid_changes:
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.store.update(record_id, **changes)
+        self.assertEqual(dict(self.store.get(record_id)), original)
+        self.assertIsNone(self.store.update(record_id + 1, amount="10"))
+
     def test_invalid_month(self):
         for value in ("2026-13", "202610", "2026-1"):
             with self.subTest(value=value), self.assertRaises(ValueError):
@@ -113,6 +143,25 @@ class TrackerTests(unittest.TestCase):
         )
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exc:
             main(["--db", str(self.db), "show", "999"])
+        self.assertEqual(exc.exception.code, 2)
+
+    def test_cli_update_and_missing_id(self):
+        record_id = self.store.add("1500", "food", "2026-10-12", "Lunch")
+        output = io.StringIO()
+        with redirect_stdout(output):
+            main([
+                "--db", str(self.db), "update", str(record_id),
+                "--amount", "2200.50", "--category", "Transport", "--note", "",
+            ])
+        self.assertEqual(
+            output.getvalue().strip(),
+            f"Updated #{record_id} | 2026-10-12 | NGN 2,200.50 | transport |",
+        )
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exc:
+            main(["--db", str(self.db), "update", str(record_id)])
+        self.assertEqual(exc.exception.code, 2)
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exc:
+            main(["--db", str(self.db), "update", "999", "--amount", "10"])
         self.assertEqual(exc.exception.code, 2)
 
 

@@ -1,4 +1,4 @@
-# Python Expense Tracker — Version 1.2 Study Guide
+# Python Expense Tracker — Version 1.3 Study Guide
 
 ## 1. What this project does
 
@@ -7,6 +7,7 @@ SQLite database, and lets a user:
 
 - add an expense;
 - show one expense by its unique ID;
+- update selected fields on an existing expense;
 - list all expenses or one month's expenses;
 - summarize spending by category;
 - export selected records to CSV; and
@@ -22,8 +23,9 @@ Install Python 3.10 or newer. Open a terminal in the downloaded or cloned projec
 folder. Use a disposable database while learning:
 
 ```sh
-python -m expense_tracker --db practice.db add 4500 groceries --date 2026-10-13 --note "Rice and vegetables"
-python -m expense_tracker --db practice.db add 2000 data --date 2026-10-13 --note "Weekly mobile data"
+python -m expense_tracker --db practice.db add 4500 groceries --date 2026-10-14 --note "Rice and vegetables"
+python -m expense_tracker --db practice.db add 2000 data --date 2026-10-14 --note "Weekly mobile data"
+python -m expense_tracker --db practice.db update 1 --amount 5200.50 --category household --note ""
 python -m expense_tracker --db practice.db show 1
 python -m expense_tracker --db practice.db list
 python -m expense_tracker --db practice.db summary --month 2026-10
@@ -35,7 +37,7 @@ On Windows, `py` can replace `python`. You must be inside the repository folder 
 Python can find the `expense_tracker` package. The global `--db` option goes before
 the command; command-specific arguments go after the command.
 
-The expected monthly total is NGN 6,500.00. Running the two `add` commands again
+The expected monthly total is NGN 7,200.50. Running the two `add` commands again
 creates two more records, because duplicate detection is not implemented.
 
 ## 3. Command behavior
@@ -44,6 +46,7 @@ creates two more records, because duplicate detection is not implemented.
 | --- | --- | --- |
 | `add AMOUNT CATEGORY` | Validate and save one expense | Prints its generated ID |
 | `show ID` | Retrieve exactly one expense | Prints one row or exits with status 2 |
+| `update ID [OPTIONS]` | Change only selected fields | Prints the updated row |
 | `list` | Retrieve matching expenses | Newest date and ID first |
 | `summary` | Add amounts by category | Prints category totals and grand total |
 | `export PATH` | Write matching rows to CSV | Overwrites the destination file |
@@ -76,7 +79,84 @@ terminal text -> argparse -> main() -> ExpenseStore -> SQLite file
 This separation is enough for a small project. A larger service would normally
 split request models, business services, repositories, migrations, and logging.
 
-## 5. What changed in Version 1.2
+## 5. What changed in Version 1.3
+
+Version 1.3 adds a partial-update path. A user chooses one or more of `--amount`,
+`--category`, `--date`, and `--note`; every omitted field keeps its existing value.
+The command rejects an empty set of changes, invalid values, and missing IDs with
+clear errors.
+
+### Shared validation functions
+
+Three small functions now hold rules used by more than one operation:
+
+- `valid_expense_id(value)` requires a positive integer and rejects booleans;
+- `normalize_category(value)` trims, lowercases, and enforces 1–50 characters;
+- `normalize_note(value)` trims and enforces at most 500 characters.
+
+`ExpenseStore.add()` now calls the category and note helpers instead of duplicating
+their logic. `ExpenseStore.get()` calls the ID helper. Their observable behavior is
+unchanged, but `add`, `get`, and `update` now share one source of truth for these
+rules.
+
+### `ExpenseStore.update(...)`
+
+The new keyword-only method has this interface:
+
+```python
+def update(
+    self, expense_id, *, amount=None, category=None, spent_on=None, note=None
+):
+    ...
+```
+
+`None` means “this field was not supplied.” An empty note is different: `note=""`
+is a real change that clears the stored note. This distinction lets the command
+preserve omitted fields while still supporting an intentional empty value.
+
+The method validates all supplied values and builds a `changes` dictionary. If the
+dictionary is empty, it raises `ValueError`. Otherwise, it creates an assignment
+list such as `amount_kobo=?, category=?`. The column names come only from hard-coded
+program keys; user values remain separate SQL parameters. One `UPDATE` statement
+changes all selected fields in a single transaction.
+
+The method returns the updated `sqlite3.Row`. It returns `None` for a well-formed
+ID that is not present, allowing the CLI to choose the user-facing error message.
+
+### CLI command
+
+The command-line layer maps flags to keyword arguments:
+
+```sh
+python -m expense_tracker --db practice.db update 1 \
+  --amount 5200.50 --category household --note ""
+```
+
+Observed output from the tested workflow:
+
+```text
+Updated #1 | 2026-10-14 | NGN 5,200.50 | household |
+```
+
+The final empty field shows that the note was deliberately cleared.
+
+### Execution trace: partial update
+
+1. `argparse` converts the ID to integer `1`; absent `--date` becomes `None`.
+2. `main()` calls `store.update()` with the supplied strings.
+3. `valid_expense_id()` accepts `1`.
+4. `money_to_kobo("5200.50")` produces integer `520050`.
+5. `normalize_category("household")` returns `"household"` and
+   `normalize_note("")` returns an empty string.
+6. `changes` contains amount, category, and note, but not the date.
+7. SQLite executes one parameterized `UPDATE`, so the original date is preserved.
+8. A `SELECT` retrieves the new row and `format_expense()` prepares the output.
+
+If any supplied value is invalid, validation raises before the update statement.
+If no flags are supplied, the empty `changes` dictionary is rejected. Tests verify
+that the original row remains unchanged after each rejected attempt.
+
+## 6. What changed in Version 1.2
 
 Version 1.2 turns two documented input limits into executable contracts. No
 runtime function changed: `ExpenseStore.add()` already enforced the limits. The
@@ -122,7 +202,7 @@ For `maximum_category = "A" * 50`:
 For `"b" * 51`, the length check is true. `add()` raises `ValueError` before the
 `INSERT`, and the final row-count assertion proves that no partial record appeared.
 
-## 6. What changed in Version 1.1
+## 7. What changed in Version 1.1
 
 ### `ExpenseStore.get(expense_id)`
 
@@ -164,9 +244,10 @@ Two tests were added:
 - storage lookup covers an existing ID, a missing ID, and invalid direct inputs;
 - CLI lookup covers exact printed output and the missing-ID exit status.
 
-The suite had 12 tests at Version 1.1 and has 14 after Version 1.2.
+The suite had 12 tests at Version 1.1, 14 after Version 1.2, and 17 after
+Version 1.3.
 
-## 7. Execution trace: `show 1`
+## 8. Execution trace: `show 1`
 
 Assume expense 1 already exists.
 
@@ -178,19 +259,19 @@ Assume expense 1 already exists.
 6. SQLite receives fixed SQL plus a separate tuple `(1,)`.
 7. `fetchone()` returns one `sqlite3.Row`, or `None` if no row matches.
 8. `format_expense()` reads named columns such as `row["amount_kobo"]`.
-9. `format_money(450000)` produces `NGN 4,500.00`.
+9. `format_money(520050)` produces `NGN 5,200.50`.
 10. The CLI prints the completed line.
 
 Observed output from the tested practice run:
 
 ```text
-#1 | 2026-10-13 | NGN 4,500.00 | groceries | Rice and vegetables
+#1 | 2026-10-14 | NGN 5,200.50 | household |
 ```
 
 For `show 999`, the observed message was `Expense ID not found.` and the process
 returned status 2. That nonzero status lets scripts distinguish success from error.
 
-## 8. Trace an added expense
+## 9. Trace an added expense
 
 For `python -m expense_tracker --db practice.db add 4500 groceries`:
 
@@ -206,7 +287,7 @@ For `python -m expense_tracker --db practice.db add 4500 groceries`:
 Predict each value before running the command. That is more useful than memorizing
 the final code.
 
-## 9. Core Python functions and decisions
+## 10. Core Python functions and decisions
 
 ### `money_to_kobo(value)`
 
@@ -232,7 +313,7 @@ formula. The function prefixes an apostrophe when a user-controlled category or
 note begins with such a character after whitespace. This is a conservative export
 defense; spreadsheet behavior still varies.
 
-## 10. Classes, state, and SQLite
+## 11. Classes, state, and SQLite
 
 `ExpenseStore` is a class. Each instance stores its database path in `self.path`.
 `self` means the particular object on which a method was called.
@@ -254,7 +335,7 @@ context handles transactions, and the helper closes each connection.
 All SQL values use `?` placeholders. Never replace them with string interpolation.
 A note that looks like SQL remains data rather than becoming a command.
 
-## 11. Tests and verified behavior
+## 12. Tests and verified behavior
 
 Run:
 
@@ -262,27 +343,28 @@ Run:
 python -m unittest discover -s tests -v
 ```
 
-The 2026-10-13 milestone run reported:
+The 2026-10-14 milestone run reported:
 
 ```text
-Ran 14 tests
+Ran 17 tests
 OK
 ```
 
 Tests use a fresh temporary folder and database for each test. They cover exact
 money conversion, rejected money and dates, exact 50/51-character category and
 500/501-character note boundaries, persistence after reopening, sorting, monthly
-filtering and totals, single-record lookup, invalid IDs, SQL-looking text, CSV
-escaping, deletion, confirmation, and real CLI paths.
+filtering and totals, single-record lookup, valid partial updates, rejected updates,
+missing update IDs, note clearing, SQL-looking text, CSV escaping, deletion,
+confirmation, and real CLI paths.
 
 A passing suite proves only the listed cases passed in that environment. It does
 not prove the absence of every bug, production performance, or security readiness.
 
-## 12. Current limitations
+## 13. Current limitations
 
 - Single local user; no accounts, authentication, or per-user authorization.
 - NGN only; the schema cannot safely mix currencies.
-- No update command, duplicate detection, undo, or audit history.
+- No duplicate detection, undo, or audit history.
 - No atomic CSV import.
 - No schema migration tool.
 - Text limits use Python's `len()` after trimming. There is no Unicode
@@ -294,7 +376,24 @@ not prove the absence of every bug, production performance, or security readines
 
 These are scope boundaries, not hidden completed features.
 
-## 13. Interview questions and honest answers
+## 14. Interview questions and honest answers
+
+**Why are the update fields keyword-only?**
+The `*` in the method signature prevents an unclear call such as
+`update(1, "20", "food")`. Names make each optional change explicit and reduce
+the chance of putting a value in the wrong field.
+
+**Why does `None` mean omitted while an empty note means clear it?**
+Partial updates need to distinguish “leave this alone” from “set this to empty.”
+The CLI naturally produces `None` for an absent flag and `""` for `--note ""`.
+
+**Is the dynamic update SQL vulnerable to user-supplied column names?**
+The assignment names come only from hard-coded dictionary keys in the program.
+Every user-controlled value is still bound through a `?` placeholder.
+
+**Why return the updated row?**
+The CLI can immediately show the final persisted state, and a future API can use
+the same result without issuing its own lookup.
 
 **Why test 50 and 51 characters instead of one ordinary category?**
 They sit on opposite sides of the stated maximum, so together they prove the
@@ -337,25 +436,26 @@ and API integration tests. Those features are not implemented here.
 Development used AI assistance. A truthful answer should distinguish generated or
 assisted implementation from the code personally studied, changed, and tested.
 
-## 14. Hands-on exercises
+## 15. Hands-on exercises
 
 Do these locally; reading alone is not practical mastery.
 
 ### Exercise A — Run and explain
 
-Add two expenses to `practice.db`, use `show` for each ID, and explain every field
-in the printed line without reading this guide.
+Add two expenses to `practice.db`, update only the category of the first, and prove
+with `show` that its amount, date, and note did not change.
 
 ### Exercise B — Follow the variables
 
-For `show 1`, write down the type and value of `args.id`, `expense_id`, `row`, and
-`row["amount_kobo"]` at each step. Then use temporary `print(type(...))` statements
-to check your predictions and remove them afterward.
+For the Version 1.3 update command, write down the type and value of `args.id`,
+`args.amount`, `args.spent_on`, `changes`, and `parameters`. Then use temporary
+`print(type(...))` statements to check your predictions and remove them afterward.
 
 ### Exercise C — Observe a failing test
 
-Temporarily change `format_expense()` so it omits the category. Run the tests,
-identify the failing assertion, restore the code, and run the suite again.
+Temporarily remove `normalize_category()` from `update()`. Run the update tests,
+identify which assertion catches the regression, restore the code, and rerun all
+tests.
 
 ### Exercise D — Explore the boundary tests
 
@@ -363,16 +463,16 @@ Read `test_category_length_boundaries()` and predict every assertion. Then run o
 that test. Change the accepted input locally to 49 characters, rerun it, explain
 why the stored-value assertion fails, and restore the original test.
 
-### Exercise E — Design before coding
+### Exercise E — Design the next milestone
 
-Write pseudocode for `update ID --amount ... --category ...`. Decide what happens
-when no fields are provided, the ID is missing, or one new value is invalid. This
-prepares the next feature without pretending it is implemented.
+Write pseudocode for atomic CSV import. Decide how to validate every row before
+inserting any row and what error should identify the first invalid CSV line. Do not
+implement it until the current update flow is understood.
 
-## 15. Readiness check
+## 16. Readiness check
 
-You understand Version 1.2 when you can run every command unaided, trace both
-`add` and `show`, explain why 50 characters pass while 51 fail, distinguish a
-missing row from an invalid ID, predict a monthly total, identify the database
-file, make a small local change, observe a relevant test fail, restore the
-behavior, and return the suite to green.
+You understand Version 1.3 when you can run every command unaided, trace `add`,
+`show`, and `update`, explain omitted versus empty values, describe why the dynamic
+assignment list is safe, prove rejected changes leave a row untouched, make a small
+local change, observe a relevant test fail, restore the behavior, and return the
+suite to green.

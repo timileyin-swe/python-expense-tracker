@@ -11,8 +11,9 @@ Install Python 3.10 or newer, clone this repository, and open a terminal in its
 folder. On Windows, replace `python` with `py` if necessary.
 
 ```sh
-python -m expense_tracker --db practice.db add 4500 groceries --date 2026-10-13 --note "Rice and vegetables"
-python -m expense_tracker --db practice.db add 2000 data --date 2026-10-13 --note "Weekly mobile data"
+python -m expense_tracker --db practice.db add 4500 groceries --date 2026-10-14 --note "Rice and vegetables"
+python -m expense_tracker --db practice.db add 2000 data --date 2026-10-14 --note "Weekly mobile data"
+python -m expense_tracker --db practice.db update 1 --amount 5200.50 --category household --note ""
 python -m expense_tracker --db practice.db show 1
 python -m expense_tracker --db practice.db list
 python -m expense_tracker --db practice.db summary --month 2026-10
@@ -22,15 +23,15 @@ python -m expense_tracker --db practice.db export expenses.csv --month 2026-10
 Example `show` result:
 
 ```text
-#1 | 2026-10-13 | NGN 4,500.00 | groceries | Rice and vegetables
+#1 | 2026-10-14 | NGN 5,200.50 | household |
 ```
 
 Example summary:
 
 ```text
 data: NGN 2,000.00
-groceries: NGN 4,500.00
-TOTAL: NGN 6,500.00
+household: NGN 5,200.50
+TOTAL: NGN 7,200.50
 ```
 
 Data survives application restarts in `~/.expense-tracker/expenses.db`.
@@ -49,7 +50,9 @@ All amounts use NGN; currencies cannot be mixed.
   from SQL.
 - `ExpenseStore.get()` returns one row or `None`, while the CLI decides how to
   present a missing record to a user.
-- `format_expense()` gives the `list` and `show` commands one shared output format.
+- `ExpenseStore.update()` validates every supplied field before one parameterized
+  update and preserves fields that were not selected.
+- `format_expense()` gives `list`, `show`, and `update` one shared output format.
 - CSV text fields are protected against common spreadsheet formula prefixes.
 - Deletion requires explicit confirmation: `python -m expense_tracker delete 1 --yes`.
 
@@ -59,10 +62,10 @@ All amounts use NGN; currencies cannot be mixed.
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains 14 tests. It uses temporary databases and covers
+The current suite contains 17 tests. It uses temporary databases and covers
 persistence, exact money, invalid input, category and note length boundaries,
-monthly totals, single-record lookup, CSV export, SQL-looking notes, deletion
-confirmation, and CLI commands.
+monthly totals, single-record lookup, partial updates, rejected updates, CSV
+export, SQL-looking notes, deletion confirmation, and CLI commands.
 
 ## Learn the project
 

@@ -51,6 +51,26 @@ def csv_safe(value):
     return value
 
 
+def valid_expense_id(value):
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("Expense ID must be a positive integer.")
+    return value
+
+
+def normalize_category(value):
+    value = value.strip().lower()
+    if not value or len(value) > 50:
+        raise ValueError("Category must contain 1 to 50 characters.")
+    return value
+
+
+def normalize_note(value):
+    value = value.strip()
+    if len(value) > 500:
+        raise ValueError("Note must contain at most 500 characters.")
+    return value
+
+
 class ExpenseStore:
     def __init__(self, path):
         self.path = Path(path)
@@ -77,12 +97,8 @@ class ExpenseStore:
     def add(self, amount, category, spent_on, note=""):
         kobo = money_to_kobo(amount)
         spent_on = valid_date(spent_on)
-        category = category.strip().lower()
-        note = note.strip()
-        if not category or len(category) > 50:
-            raise ValueError("Category must contain 1 to 50 characters.")
-        if len(note) > 500:
-            raise ValueError("Note must contain at most 500 characters.")
+        category = normalize_category(category)
+        note = normalize_note(note)
         with self.connect() as conn:
             cursor = conn.execute(
                 "INSERT INTO expenses(amount_kobo,category,spent_on,note) VALUES(?,?,?,?)",
@@ -92,9 +108,35 @@ class ExpenseStore:
 
     def get(self, expense_id):
         """Return one expense by ID, or None when no matching row exists."""
-        if isinstance(expense_id, bool) or not isinstance(expense_id, int) or expense_id <= 0:
-            raise ValueError("Expense ID must be a positive integer.")
+        expense_id = valid_expense_id(expense_id)
         with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM expenses WHERE id=?", (expense_id,)
+            ).fetchone()
+
+    def update(self, expense_id, *, amount=None, category=None, spent_on=None, note=None):
+        """Update selected fields and return the row, or None when the ID is missing."""
+        expense_id = valid_expense_id(expense_id)
+        changes = {}
+        if amount is not None:
+            changes["amount_kobo"] = money_to_kobo(amount)
+        if category is not None:
+            changes["category"] = normalize_category(category)
+        if spent_on is not None:
+            changes["spent_on"] = valid_date(spent_on)
+        if note is not None:
+            changes["note"] = normalize_note(note)
+        if not changes:
+            raise ValueError("Provide at least one field to update.")
+
+        assignments = ", ".join(f"{column}=?" for column in changes)
+        parameters = [*changes.values(), expense_id]
+        with self.connect() as conn:
+            cursor = conn.execute(
+                f"UPDATE expenses SET {assignments} WHERE id=?", parameters
+            )
+            if cursor.rowcount == 0:
+                return None
             return conn.execute(
                 "SELECT * FROM expenses WHERE id=?", (expense_id,)
             ).fetchone()

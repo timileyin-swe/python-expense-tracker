@@ -1,5 +1,41 @@
 # Development log
 
+## 2026-10-14 — Update selected expense fields
+
+### Completed
+
+- Added `ExpenseStore.update()` with keyword-only optional fields for amount,
+  category, date, and note.
+- Preserved every omitted field and allowed `--note ""` to intentionally clear a
+  note.
+- Added shared `valid_expense_id()`, `normalize_category()`, and
+  `normalize_note()` helpers so add, get, and update use consistent rules.
+- Validated every supplied change before one parameterized SQL update.
+- Returned the updated row for reuse by the CLI while returning `None` for a
+  well-formed missing ID.
+- Added `python -m expense_tracker update ID [OPTIONS]` and updated the README,
+  study guide, and development plan to Version 1.3.
+
+### Tested
+
+- `python -m compileall -q expense_tracker tests`: completed successfully.
+- Three targeted update tests passed.
+- `python -m unittest discover -s tests -v`: 17 tests passed.
+- Verified selected-field updates, preservation of an omitted date, intentional
+  note clearing, rejected invalid changes, no-field errors, and missing-ID errors.
+- Ran an end-to-end add/update/show/summary workflow; the stored row contained
+  NGN 5,200.50, category `household`, the original date, and an empty note.
+
+### Pending
+
+- Atomic CSV import with line-specific validation errors.
+- Any HTTP API, PostgreSQL integration, authentication, cloud deployment,
+  observability, or multi-user support.
+
+### Blocked
+
+- Nothing for this milestone.
+
 ## 2026-10-13 — Lock text-length boundaries with tests
 
 ### Completed
