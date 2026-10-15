@@ -1,5 +1,45 @@
 # Development log
 
+## 2026-10-15 — Atomic CSV import
+
+### Completed
+
+- Added `ExpenseStore.import_csv()` for the documented
+  `amount_ngn,category,date,note` header and the app's exported format with an
+  optional leading `id` column.
+- Read and validate every row before opening the insert transaction, so an invalid
+  later row cannot leave earlier rows in the database.
+- Added line-specific validation errors for bad row shapes, amounts, categories,
+  dates, and notes.
+- Ignored source IDs and let SQLite generate fresh local IDs, preventing imported
+  files from colliding with existing records.
+- Accepted UTF-8 CSV files with or without a byte-order mark and added the
+  `python -m expense_tracker import PATH` command.
+- Updated the README, study guide, and development plan to Version 1.4.
+
+### Tested
+
+- `python -m compileall -q expense_tracker tests`: completed successfully.
+- Four targeted import tests passed.
+- `python -m unittest discover -s tests -v`: 21 tests passed.
+- Verified an export-to-import round trip into a database that already had a row,
+  fresh ID allocation, four-column input, CLI output, bad-header rejection, extra
+  field rejection, and rollback-by-design when line 3 contained an invalid amount.
+- Ran an end-to-end export/import/list/summary workflow: two records imported into
+  a fresh database and the October total remained NGN 7,200.50.
+
+### Pending
+
+- Hands-on learner completion of the Version 1.4 exercises.
+- The separate job-application API, followed later by PostgreSQL, queues, Docker,
+  monitoring, an AI document assistant, and optional cloud deployment.
+
+### Blocked
+
+- Publishing the prepared job-application API remains blocked because the
+  connected GitHub capabilities cannot create a repository and the intended
+  repository does not yet exist. No unrelated repository was used as a substitute.
+
 ## 2026-10-14 — Update selected expense fields
 
 ### Completed

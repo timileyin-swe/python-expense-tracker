@@ -9,15 +9,18 @@
   document a realistic disposable-database workflow.
 - Version 1.3: update only explicitly selected expense fields, including clearing
   a note, while preserving omitted values and rejecting invalid changes.
+- Version 1.4: import either the documented four-column CSV format or this app's
+  exported five-column format, validate every row before writing, report invalid
+  line numbers, and generate fresh local IDs.
 
 ## Next small milestones
 
 Complete at most one per scheduled development run:
 
-1. Add CSV import with all-or-nothing validation and clear error reporting.
-2. Design a FastAPI layer after the learner reaches functions, modules, and
-   exceptions through hands-on Python work.
-3. Evaluate PostgreSQL and cloud deployment when the API and tests are stable.
+1. Keep the usable expense-tracker CLI stable and make only evidence-backed fixes.
+2. Continue the separate job-application API after the learner reaches functions,
+   modules, and exceptions through hands-on Python work.
+3. Evaluate PostgreSQL and cloud deployment when that API and its tests are stable.
 
 Do not label future milestones as completed. Cloud deployment and provider
 services need a separate setup decision; this project currently has no hosting

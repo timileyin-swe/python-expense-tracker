@@ -36,6 +36,8 @@ def main(argv=None):
         command.add_argument("--month", help="Filter using YYYY-MM")
         if name == "export":
             command.add_argument("path")
+    import_command = commands.add_parser("import", help="Import expenses from CSV")
+    import_command.add_argument("path")
     delete = commands.add_parser("delete")
     delete.add_argument("id", type=int)
     delete.add_argument("--yes", action="store_true", help="Confirm permanent deletion")
@@ -74,6 +76,8 @@ def main(argv=None):
             print(f"TOTAL: {format_money(sum(totals.values()))}")
         elif args.command == "export":
             print(f"Exported {store.export(args.path, args.month)} expenses.")
+        elif args.command == "import":
+            print(f"Imported {store.import_csv(args.path)} expenses.")
         elif args.command == "delete":
             if not args.yes:
                 parser.error("Deletion requires --yes. Back up your database first.")

@@ -1,4 +1,4 @@
-# Python Expense Tracker — Version 1.3 Study Guide
+# Python Expense Tracker — Version 1.4 Study Guide
 
 ## 1. What this project does
 
@@ -10,7 +10,8 @@ SQLite database, and lets a user:
 - update selected fields on an existing expense;
 - list all expenses or one month's expenses;
 - summarize spending by category;
-- export selected records to CSV; and
+- export selected records to CSV;
+- import validated CSV records atomically; and
 - permanently delete a confirmed record.
 
 It runs in a terminal. It is not a website and does not use a cloud service. The
@@ -30,6 +31,8 @@ python -m expense_tracker --db practice.db show 1
 python -m expense_tracker --db practice.db list
 python -m expense_tracker --db practice.db summary --month 2026-10
 python -m expense_tracker --db practice.db export practice.csv --month 2026-10
+python -m expense_tracker --db restored.db import practice.csv
+python -m expense_tracker --db restored.db summary --month 2026-10
 python -m unittest discover -s tests -v
 ```
 
@@ -37,8 +40,10 @@ On Windows, `py` can replace `python`. You must be inside the repository folder 
 Python can find the `expense_tracker` package. The global `--db` option goes before
 the command; command-specific arguments go after the command.
 
-The expected monthly total is NGN 7,200.50. Running the two `add` commands again
-creates two more records, because duplicate detection is not implemented.
+The expected monthly total is NGN 7,200.50 in both databases. The import creates
+new IDs; it does not copy IDs from `practice.csv`. Running the two `add` commands
+or the import again creates duplicate expenses because duplicate detection is not
+implemented.
 
 ## 3. Command behavior
 
@@ -50,6 +55,7 @@ creates two more records, because duplicate detection is not implemented.
 | `list` | Retrieve matching expenses | Newest date and ID first |
 | `summary` | Add amounts by category | Prints category totals and grand total |
 | `export PATH` | Write matching rows to CSV | Overwrites the destination file |
+| `import PATH` | Validate and insert every CSV row | Writes all rows or none |
 | `delete ID --yes` | Permanently remove a row | Refuses to run without confirmation |
 
 `--month YYYY-MM` works with `list`, `summary`, and `export`.
@@ -60,7 +66,7 @@ creates two more records, because duplicate detection is not implemented.
 | --- | --- |
 | `expense_tracker/__init__.py` | Marks the directory as a Python package |
 | `expense_tracker/__main__.py` | Parses commands, selects behavior, prints results |
-| `expense_tracker/core.py` | Validation, money conversion, persistence, summaries, export |
+| `expense_tracker/core.py` | Validation, money conversion, persistence, summaries, CSV I/O |
 | `tests/test_tracker.py` | Verifies behavior with isolated temporary databases |
 | `README.md` | Quick public overview and runnable examples |
 | `docs/STUDY_GUIDE.md` | Detailed learning reference and exercises |
@@ -79,7 +85,87 @@ terminal text -> argparse -> main() -> ExpenseStore -> SQLite file
 This separation is enough for a small project. A larger service would normally
 split request models, business services, repositories, migrations, and logging.
 
-## 5. What changed in Version 1.3
+## 5. What changed in Version 1.4
+
+Version 1.4 adds an atomic CSV import path. “Atomic” means one import is treated as
+a unit: all valid rows are stored, or an error leaves the database unchanged. The
+CLI accepts either of these exact header orders:
+
+```text
+amount_ngn,category,date,note
+id,amount_ngn,category,date,note
+```
+
+The second form is the file produced by this application's `export` command. The
+source `id` values are deliberately ignored; SQLite allocates fresh IDs that do
+not collide with rows already in the destination database. A header-only file is
+valid and imports zero expenses.
+
+### Changed constants and functions
+
+- `IMPORT_COLUMNS` defines the four fields that become a new expense.
+- `EXPORT_COLUMNS` adds `id` in front of those fields. `export()` now writes this
+  shared constant so the exporter and importer cannot silently disagree.
+- `ExpenseStore.import_csv(path)` reads, validates, and inserts a CSV file.
+- `main()` now exposes that method as `import PATH` and prints the inserted count.
+
+The method opens files with `utf-8-sig`. Normal UTF-8 still works, while a UTF-8
+byte-order mark from some spreadsheet tools is removed before checking the first
+header name.
+
+### Two-phase all-or-nothing design
+
+The first phase does not write to SQLite. `csv.DictReader` checks the header and
+turns each CSV row into a dictionary. Every row must have the exact number of
+fields. The existing validators then convert the row into a tuple:
+
+```python
+(
+    money_to_kobo(row["amount_ngn"]),
+    normalize_category(row["category"]),
+    valid_date(row["date"]),
+    normalize_note(row["note"]),
+)
+```
+
+Valid tuples are kept in the in-memory `records` list. If validation fails, the
+method raises a new `ValueError` containing the physical CSV line number and keeps
+the original reason as its exception cause.
+
+Only after the whole file passes does the second phase open a database connection.
+`executemany()` inserts all prepared tuples inside the connection's single
+transaction. SQLite rolls that transaction back if an insert fails. This gives two
+layers of protection: normal input failures occur before a write, and database
+failures roll back the transaction.
+
+### Successful command trace
+
+For `python -m expense_tracker --db restored.db import practice.csv`:
+
+1. `argparse` stores `import` as the command and the file name as `args.path`.
+2. `ExpenseStore` initializes `restored.db` if it does not exist.
+3. `import_csv()` validates the header and converts every data row.
+4. The exported `id` column is read for shape checking but is not inserted.
+5. One `executemany()` call inserts the prepared values and SQLite generates IDs.
+6. The transaction commits and the method returns the number of inserted rows.
+7. The CLI prints `Imported 2 expenses.` in the documented practice workflow.
+
+### Failure trace and atomicity
+
+Assume line 2 is valid and line 3 has amount `0`:
+
+1. The validated line-2 tuple is appended only to the in-memory list.
+2. `money_to_kobo("0")` rejects line 3 because the amount is not greater than zero.
+3. `import_csv()` raises an error beginning `CSV line 3:`.
+4. Execution never reaches the database connection or `executemany()`.
+5. A test queries the destination and proves it still contains only its original
+   row; line 2 was never partially imported.
+
+Exact headers make accidental column swaps visible instead of guessing. Holding
+the prepared rows in memory keeps the beginner implementation clear, but it also
+means this version is intended for small personal files rather than huge imports.
+
+## 6. What changed in Version 1.3
 
 Version 1.3 adds a partial-update path. A user chooses one or more of `--amount`,
 `--category`, `--date`, and `--note`; every omitted field keeps its existing value.
@@ -156,7 +242,7 @@ If any supplied value is invalid, validation raises before the update statement.
 If no flags are supplied, the empty `changes` dictionary is rejected. Tests verify
 that the original row remains unchanged after each rejected attempt.
 
-## 6. What changed in Version 1.2
+## 7. What changed in Version 1.2
 
 Version 1.2 turns two documented input limits into executable contracts. No
 runtime function changed: `ExpenseStore.add()` already enforced the limits. The
@@ -202,7 +288,7 @@ For `maximum_category = "A" * 50`:
 For `"b" * 51`, the length check is true. `add()` raises `ValueError` before the
 `INSERT`, and the final row-count assertion proves that no partial record appeared.
 
-## 7. What changed in Version 1.1
+## 8. What changed in Version 1.1
 
 ### `ExpenseStore.get(expense_id)`
 
@@ -247,7 +333,7 @@ Two tests were added:
 The suite had 12 tests at Version 1.1, 14 after Version 1.2, and 17 after
 Version 1.3.
 
-## 8. Execution trace: `show 1`
+## 9. Execution trace: `show 1`
 
 Assume expense 1 already exists.
 
@@ -271,7 +357,7 @@ Observed output from the tested practice run:
 For `show 999`, the observed message was `Expense ID not found.` and the process
 returned status 2. That nonzero status lets scripts distinguish success from error.
 
-## 9. Trace an added expense
+## 10. Trace an added expense
 
 For `python -m expense_tracker --db practice.db add 4500 groceries`:
 
@@ -287,7 +373,7 @@ For `python -m expense_tracker --db practice.db add 4500 groceries`:
 Predict each value before running the command. That is more useful than memorizing
 the final code.
 
-## 10. Core Python functions and decisions
+## 11. Core Python functions and decisions
 
 ### `money_to_kobo(value)`
 
@@ -313,7 +399,7 @@ formula. The function prefixes an apostrophe when a user-controlled category or
 note begins with such a character after whitespace. This is a conservative export
 defense; spreadsheet behavior still varies.
 
-## 11. Classes, state, and SQLite
+## 12. Classes, state, and SQLite
 
 `ExpenseStore` is a class. Each instance stores its database path in `self.path`.
 `self` means the particular object on which a method was called.
@@ -335,7 +421,7 @@ context handles transactions, and the helper closes each connection.
 All SQL values use `?` placeholders. Never replace them with string interpolation.
 A note that looks like SQL remains data rather than becoming a command.
 
-## 12. Tests and verified behavior
+## 13. Tests and verified behavior
 
 Run:
 
@@ -343,10 +429,10 @@ Run:
 python -m unittest discover -s tests -v
 ```
 
-The 2026-10-14 milestone run reported:
+The 2026-10-15 milestone run reported:
 
 ```text
-Ran 17 tests
+Ran 21 tests
 OK
 ```
 
@@ -355,17 +441,22 @@ money conversion, rejected money and dates, exact 50/51-character category and
 500/501-character note boundaries, persistence after reopening, sorting, monthly
 filtering and totals, single-record lookup, valid partial updates, rejected updates,
 missing update IDs, note clearing, SQL-looking text, CSV escaping, deletion,
-confirmation, and real CLI paths.
+confirmation, export-to-import behavior, fresh imported IDs, atomic rejection of an
+invalid later row, malformed CSV shapes, and real CLI paths.
 
 A passing suite proves only the listed cases passed in that environment. It does
 not prove the absence of every bug, production performance, or security readiness.
 
-## 13. Current limitations
+## 14. Current limitations
 
 - Single local user; no accounts, authentication, or per-user authorization.
 - NGN only; the schema cannot safely mix currencies.
-- No duplicate detection, undo, or audit history.
-- No atomic CSV import.
+- No duplicate detection, undo, or audit history. Importing the same file twice
+  creates two sets of expenses.
+- CSV import requires one of two exact header orders, generates fresh IDs, and
+  holds every prepared row in memory before inserting.
+- Formula-like text protected by export begins with an apostrophe. Import treats
+  that apostrophe as literal data because removing it would be ambiguous.
 - No schema migration tool.
 - Text limits use Python's `len()` after trimming. There is no Unicode
   normalization or separate UTF-8 byte limit.
@@ -376,7 +467,24 @@ not prove the absence of every bug, production performance, or security readines
 
 These are scope boundaries, not hidden completed features.
 
-## 14. Interview questions and honest answers
+## 15. Interview questions and honest answers
+
+**Why validate the full CSV before inserting its first row?**
+It prevents a late bad row from leaving an incomplete import. Valid rows exist only
+as Python tuples until every row passes.
+
+**Why also use one database transaction?**
+Validation cannot predict every database error. A single transaction makes SQLite
+roll back earlier inserts if an insert operation fails.
+
+**Why ignore IDs from the imported file?**
+An ID is meaningful only inside its source database. Reusing it could collide with
+an existing row or overwrite the destination's identity rules. SQLite safely
+generates the next local IDs.
+
+**Why require exact headers instead of guessing similar column names?**
+Silent guesses can put a date or amount into the wrong field. An explicit contract
+fails early and tells the user how to fix the file.
 
 **Why are the update fields keyword-only?**
 The `*` in the method signature prevents an unclear call such as
@@ -436,43 +544,48 @@ and API integration tests. Those features are not implemented here.
 Development used AI assistance. A truthful answer should distinguish generated or
 assisted implementation from the code personally studied, changed, and tested.
 
-## 15. Hands-on exercises
+## 16. Hands-on exercises
 
 Do these locally; reading alone is not practical mastery.
 
-### Exercise A — Run and explain
+### Exercise A — Import and explain
 
-Add two expenses to `practice.db`, update only the category of the first, and prove
-with `show` that its amount, date, and note did not change.
+Create `manual.csv` with the four-column header and two expense rows. Import it into
+a new database, list the records, and explain why their IDs were generated locally.
 
-### Exercise B — Follow the variables
+### Exercise B — Follow the import variables
 
-For the Version 1.3 update command, write down the type and value of `args.id`,
-`args.amount`, `args.spent_on`, `changes`, and `parameters`. Then use temporary
-`print(type(...))` statements to check your predictions and remove them afterward.
+For the first CSV row, write down the type and value of `reader.fieldnames`, `row`,
+`line_number`, and the tuple added to `records`. Use temporary `print()` calls to
+check your predictions, then remove them and return the suite to green.
 
 ### Exercise C — Observe a failing test
 
-Temporarily remove `normalize_category()` from `update()`. Run the update tests,
-identify which assertion catches the regression, restore the code, and rerun all
-tests.
+Temporarily replace `normalize_category(row["category"])` with the raw value. Run
+the import tests, identify the assertion that catches the regression, restore the
+code, and rerun all tests.
 
-### Exercise D — Explore the boundary tests
+### Exercise D — Prove atomicity yourself
 
-Read `test_category_length_boundaries()` and predict every assertion. Then run only
-that test. Change the accepted input locally to 49 characters, rerun it, explain
-why the stored-value assertion fails, and restore the original test.
+Make a CSV whose first data row is valid and whose second has an impossible date.
+Import it, read the reported line number, then run `list` and prove that neither
+row was added.
 
-### Exercise E — Design the next milestone
+### Exercise E — Revisit partial updates
 
-Write pseudocode for atomic CSV import. Decide how to validate every row before
-inserting any row and what error should identify the first invalid CSV line. Do not
-implement it until the current update flow is understood.
+Add two expenses, update only the category of the first, and prove with `show` that
+its amount, date, and note did not change.
 
-## 16. Readiness check
+### Exercise F — Connect the next project
 
-You understand Version 1.3 when you can run every command unaided, trace `add`,
-`show`, and `update`, explain omitted versus empty values, describe why the dynamic
-assignment list is safe, prove rejected changes leave a row untouched, make a small
-local change, observe a relevant test fail, restore the behavior, and return the
-suite to green.
+Write pseudocode for a future `POST /applications` FastAPI route. Mark which input
+rules belong in an HTTP request model and which belong in reusable domain logic.
+Do not claim or deploy the API until its separate repository and tests exist.
+
+## 17. Readiness check
+
+You understand Version 1.4 when you can run every command unaided, build a valid
+four-column CSV, trace `import_csv()` through both phases, explain why source IDs
+are ignored, predict the line number of a bad row, prove rejected input leaves the
+database untouched, make a small local change, observe a relevant test fail,
+restore the behavior, and return all 21 tests to green.

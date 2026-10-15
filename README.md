@@ -1,9 +1,9 @@
 # Python Expense Tracker
 
 A local command-line application for recording NGN expenses, finding one expense
-by ID, filtering by month, viewing category totals, and exporting CSV files. Built
-as a learning portfolio project using Python's standard library; no external
-packages are required.
+by ID, filtering by month, viewing category totals, and importing or exporting CSV
+files. Built as a learning portfolio project using Python's standard library; no
+external packages are required.
 
 ## Quick start
 
@@ -18,6 +18,7 @@ python -m expense_tracker --db practice.db show 1
 python -m expense_tracker --db practice.db list
 python -m expense_tracker --db practice.db summary --month 2026-10
 python -m expense_tracker --db practice.db export expenses.csv --month 2026-10
+python -m expense_tracker --db restored.db import expenses.csv
 ```
 
 Example `show` result:
@@ -52,6 +53,8 @@ All amounts use NGN; currencies cannot be mixed.
   present a missing record to a user.
 - `ExpenseStore.update()` validates every supplied field before one parameterized
   update and preserves fields that were not selected.
+- `ExpenseStore.import_csv()` validates every row before one transaction inserts
+  anything. Errors identify the CSV line, and imported source IDs are ignored.
 - `format_expense()` gives `list`, `show`, and `update` one shared output format.
 - CSV text fields are protected against common spreadsheet formula prefixes.
 - Deletion requires explicit confirmation: `python -m expense_tracker delete 1 --yes`.
@@ -62,10 +65,11 @@ All amounts use NGN; currencies cannot be mixed.
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains 17 tests. It uses temporary databases and covers
+The current suite contains 21 tests. It uses temporary databases and covers
 persistence, exact money, invalid input, category and note length boundaries,
 monthly totals, single-record lookup, partial updates, rejected updates, CSV
-export, SQL-looking notes, deletion confirmation, and CLI commands.
+export, atomic CSV import, malformed files, SQL-looking notes, deletion
+confirmation, and CLI commands.
 
 ## Learn the project
 
@@ -77,9 +81,11 @@ future milestones without presenting them as finished features.
 ## Scope and limitations
 
 This is a single-user local CLI, with no web interface, authentication, encryption,
-or cloud deployment. CSV export overwrites the specified output file. Back up the
-SQLite file while the application is closed. Deletion has no undo. Do not commit
-personal spending records; database and CSV files are ignored by Git.
+or cloud deployment. CSV export overwrites the specified output file. CSV import
+accepts only its documented headers, generates new IDs, and does not detect
+duplicates. Back up the SQLite file while the application is closed. Deletion has
+no undo. Do not commit personal spending records; database and CSV files are
+ignored by Git.
 
 Development uses AI assistance. Learning and hands-on exercises are documented
 separately from implementation; this repository makes no claims about production

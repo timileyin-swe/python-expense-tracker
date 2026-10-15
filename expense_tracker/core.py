@@ -8,6 +8,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 MAX_KOBO = 1_000_000_000_000
+IMPORT_COLUMNS = ["amount_ngn", "category", "date", "note"]
+EXPORT_COLUMNS = ["id", *IMPORT_COLUMNS]
 
 
 def money_to_kobo(value):
@@ -168,10 +170,43 @@ class ExpenseStore:
         rows = self.list(month)
         with open(path, "w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
-            writer.writerow(["id", "amount_ngn", "category", "date", "note"])
+            writer.writerow(EXPORT_COLUMNS)
             for row in rows:
                 writer.writerow([
                     row["id"], f"{Decimal(row['amount_kobo']) / 100:.2f}",
                     csv_safe(row["category"]), row["spent_on"], csv_safe(row["note"]),
                 ])
         return len(rows)
+
+    def import_csv(self, path):
+        """Validate a CSV completely, then insert all rows in one transaction."""
+        records = []
+        with open(path, encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if reader.fieldnames not in (IMPORT_COLUMNS, EXPORT_COLUMNS):
+                expected = ",".join(IMPORT_COLUMNS)
+                raise ValueError(
+                    f"CSV header must be {expected}, with an optional leading id column."
+                )
+            for row in reader:
+                line_number = reader.line_num
+                if None in row or any(row[column] is None for column in IMPORT_COLUMNS):
+                    raise ValueError(
+                        f"CSV line {line_number}: expected exactly {len(reader.fieldnames)} fields."
+                    )
+                try:
+                    records.append((
+                        money_to_kobo(row["amount_ngn"]),
+                        normalize_category(row["category"]),
+                        valid_date(row["date"]),
+                        normalize_note(row["note"]),
+                    ))
+                except ValueError as exc:
+                    raise ValueError(f"CSV line {line_number}: {exc}") from exc
+
+        with self.connect() as conn:
+            conn.executemany(
+                "INSERT INTO expenses(amount_kobo,category,spent_on,note) VALUES(?,?,?,?)",
+                records,
+            )
+        return len(records)

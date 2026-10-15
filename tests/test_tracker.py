@@ -113,6 +113,51 @@ class TrackerTests(unittest.TestCase):
         self.assertEqual(row["amount_ngn"], "12.50")
         self.assertEqual(row["note"], "'=SUM(1,2)")
 
+    def test_import_exported_csv_uses_new_ids(self):
+        source = ExpenseStore(Path(self.temp.name) / "source.db")
+        source.add("12.50", "Food", "2026-10-01", "Lunch")
+        source.add("20", "data", "2026-10-02", "Weekly plan")
+        path = Path(self.temp.name) / "export.csv"
+        source.export(path)
+
+        existing_id = self.store.add("5", "transport", "2026-09-30")
+        self.assertEqual(self.store.import_csv(path), 2)
+
+        self.assertEqual(existing_id, 1)
+        self.assertEqual([row["id"] for row in self.store.list()], [2, 3, 1])
+        self.assertEqual(self.store.get(2)["category"], "data")
+        self.assertEqual(self.store.get(3)["amount_kobo"], 1250)
+        self.assertEqual(self.store.get(3)["note"], "Lunch")
+
+    def test_import_is_atomic_and_reports_invalid_line(self):
+        existing_id = self.store.add("5", "transport", "2026-09-30")
+        path = Path(self.temp.name) / "invalid.csv"
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["amount_ngn", "category", "date", "note"])
+            writer.writerow(["12.50", "food", "2026-10-01", "Lunch"])
+            writer.writerow(["0", "data", "2026-10-02", "Invalid amount"])
+
+        with self.assertRaisesRegex(ValueError, r"CSV line 3:.*greater than zero"):
+            self.store.import_csv(path)
+        self.assertEqual([row["id"] for row in self.store.list()], [existing_id])
+
+    def test_import_rejects_bad_header_and_extra_fields(self):
+        path = Path(self.temp.name) / "invalid-shape.csv"
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["amount", "category", "date", "note"])
+        with self.assertRaisesRegex(ValueError, "CSV header must be"):
+            self.store.import_csv(path)
+
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["amount_ngn", "category", "date", "note"])
+            writer.writerow(["12.50", "food", "2026-10-01", "Lunch", "unexpected"])
+        with self.assertRaisesRegex(ValueError, "CSV line 2: expected exactly 4 fields"):
+            self.store.import_csv(path)
+        self.assertEqual(self.store.list(), [])
+
     def test_delete_and_missing_record(self):
         record_id = self.store.add("10", "food", "2026-10-01")
         self.assertTrue(self.store.delete(record_id))
@@ -163,6 +208,21 @@ class TrackerTests(unittest.TestCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exc:
             main(["--db", str(self.db), "update", "999", "--amount", "10"])
         self.assertEqual(exc.exception.code, 2)
+
+    def test_cli_import_without_id_column(self):
+        path = Path(self.temp.name) / "import.csv"
+        with path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["amount_ngn", "category", "date", "note"])
+            writer.writerow(["1500.25", " Food ", "2026-10-15", " Dinner "])
+        output = io.StringIO()
+        with redirect_stdout(output):
+            main(["--db", str(self.db), "import", str(path)])
+        self.assertEqual(output.getvalue().strip(), "Imported 1 expenses.")
+        row = self.store.list()[0]
+        self.assertEqual(row["amount_kobo"], 150025)
+        self.assertEqual(row["category"], "food")
+        self.assertEqual(row["note"], "Dinner")
 
 
 if __name__ == "__main__":
