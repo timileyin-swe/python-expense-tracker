@@ -1,4 +1,4 @@
-# Python Expense Tracker — Version 1.4 Study Guide
+# Python Expense Tracker — Version 1.4.1 Study Guide
 
 ## 1. What this project does
 
@@ -56,7 +56,7 @@ implemented.
 | `summary` | Add amounts by category | Prints category totals and grand total |
 | `export PATH` | Write matching rows to CSV | Overwrites the destination file |
 | `import PATH` | Validate and insert every CSV row | Writes all rows or none |
-| `delete ID --yes` | Permanently remove a row | Refuses to run without confirmation |
+| `delete ID --yes` | Permanently remove a row | Requires a positive ID and confirmation |
 
 `--month YYYY-MM` works with `list`, `summary`, and `export`.
 
@@ -85,7 +85,74 @@ terminal text -> argparse -> main() -> ExpenseStore -> SQLite file
 This separation is enough for a small project. A larger service would normally
 split request models, business services, repositories, migrations, and logging.
 
-## 5. What changed in Version 1.4
+## 5. What changed in Version 1.4.1
+
+Version 1.4.1 is a small deletion-safety patch. `get()` and `update()` already
+required a positive integer ID, but `delete()` previously sent its argument
+straight to SQLite. A direct Python caller could therefore pass values outside the
+documented ID contract. Destructive operations should validate at least as
+strictly as read and update operations.
+
+### The Python type trap
+
+Python makes `bool` a subclass of `int`:
+
+```python
+isinstance(True, int)  # True
+int(True)              # 1
+```
+
+That is convenient for some arithmetic, but unsafe for an expense ID. Without the
+explicit boolean check in `valid_expense_id()`, `True` could behave like ID 1.
+Numeric-looking strings such as `"1"` also do not satisfy the method's Python API
+contract, even if a database engine can compare them with an integer column.
+
+Parameterized SQL protects SQL structure from injection; it does not decide
+whether a value is meaningful for the application. Domain validation and SQL
+parameters solve different problems, so this code uses both.
+
+### Changed function
+
+`ExpenseStore.delete()` now validates before opening a connection:
+
+```python
+def delete(self, expense_id):
+    expense_id = valid_expense_id(expense_id)
+    with self.connect() as conn:
+        cursor = conn.execute("DELETE FROM expenses WHERE id=?", (expense_id,))
+        return cursor.rowcount > 0
+```
+
+Reusing the shared helper keeps one ID rule across `get()`, `update()`, and
+`delete()`. A malformed ID raises `ValueError`. A well-formed positive integer
+that is not stored still returns `False`; malformed input and a missing record are
+different outcomes.
+
+### Execution trace: rejected direct call
+
+For `store.delete(True)`:
+
+1. `delete()` immediately calls `valid_expense_id(True)`.
+2. The helper checks `isinstance(value, bool)` before accepting integers.
+3. It raises `ValueError("Expense ID must be a positive integer.")`.
+4. `self.connect()` is never called and no `DELETE` statement is prepared.
+5. The regression test retrieves the original row and proves it still exists.
+
+### Execution trace: rejected CLI command
+
+For `python -m expense_tracker --db practice.db delete -1 --yes`:
+
+1. `argparse` converts the text `-1` to integer `-1` and records confirmation.
+2. `main()` calls `store.delete(-1)`.
+3. `valid_expense_id()` rejects the nonpositive value before SQL.
+4. `main()` catches the `ValueError`; `parser.error()` prints the rule and exits
+   with status 2.
+5. The test confirms the existing expense count is unchanged.
+
+This patch deliberately adds no new command. It strengthens an existing contract,
+which is valuable maintenance work even though the production change is one line.
+
+## 6. What changed in Version 1.4
 
 Version 1.4 adds an atomic CSV import path. “Atomic” means one import is treated as
 a unit: all valid rows are stored, or an error leaves the database unchanged. The
@@ -165,7 +232,7 @@ Exact headers make accidental column swaps visible instead of guessing. Holding
 the prepared rows in memory keeps the beginner implementation clear, but it also
 means this version is intended for small personal files rather than huge imports.
 
-## 6. What changed in Version 1.3
+## 7. What changed in Version 1.3
 
 Version 1.3 adds a partial-update path. A user chooses one or more of `--amount`,
 `--category`, `--date`, and `--note`; every omitted field keeps its existing value.
@@ -242,7 +309,7 @@ If any supplied value is invalid, validation raises before the update statement.
 If no flags are supplied, the empty `changes` dictionary is rejected. Tests verify
 that the original row remains unchanged after each rejected attempt.
 
-## 7. What changed in Version 1.2
+## 8. What changed in Version 1.2
 
 Version 1.2 turns two documented input limits into executable contracts. No
 runtime function changed: `ExpenseStore.add()` already enforced the limits. The
@@ -288,7 +355,7 @@ For `maximum_category = "A" * 50`:
 For `"b" * 51`, the length check is true. `add()` raises `ValueError` before the
 `INSERT`, and the final row-count assertion proves that no partial record appeared.
 
-## 8. What changed in Version 1.1
+## 9. What changed in Version 1.1
 
 ### `ExpenseStore.get(expense_id)`
 
@@ -333,7 +400,7 @@ Two tests were added:
 The suite had 12 tests at Version 1.1, 14 after Version 1.2, and 17 after
 Version 1.3.
 
-## 9. Execution trace: `show 1`
+## 10. Execution trace: `show 1`
 
 Assume expense 1 already exists.
 
@@ -357,7 +424,7 @@ Observed output from the tested practice run:
 For `show 999`, the observed message was `Expense ID not found.` and the process
 returned status 2. That nonzero status lets scripts distinguish success from error.
 
-## 10. Trace an added expense
+## 11. Trace an added expense
 
 For `python -m expense_tracker --db practice.db add 4500 groceries`:
 
@@ -373,7 +440,7 @@ For `python -m expense_tracker --db practice.db add 4500 groceries`:
 Predict each value before running the command. That is more useful than memorizing
 the final code.
 
-## 11. Core Python functions and decisions
+## 12. Core Python functions and decisions
 
 ### `money_to_kobo(value)`
 
@@ -399,7 +466,7 @@ formula. The function prefixes an apostrophe when a user-controlled category or
 note begins with such a character after whitespace. This is a conservative export
 defense; spreadsheet behavior still varies.
 
-## 12. Classes, state, and SQLite
+## 13. Classes, state, and SQLite
 
 `ExpenseStore` is a class. Each instance stores its database path in `self.path`.
 `self` means the particular object on which a method was called.
@@ -421,7 +488,7 @@ context handles transactions, and the helper closes each connection.
 All SQL values use `?` placeholders. Never replace them with string interpolation.
 A note that looks like SQL remains data rather than becoming a command.
 
-## 13. Tests and verified behavior
+## 14. Tests and verified behavior
 
 Run:
 
@@ -429,10 +496,10 @@ Run:
 python -m unittest discover -s tests -v
 ```
 
-The 2026-10-15 milestone run reported:
+The 2026-10-16 milestone run reported:
 
 ```text
-Ran 21 tests
+Ran 22 tests
 OK
 ```
 
@@ -441,13 +508,14 @@ money conversion, rejected money and dates, exact 50/51-character category and
 500/501-character note boundaries, persistence after reopening, sorting, monthly
 filtering and totals, single-record lookup, valid partial updates, rejected updates,
 missing update IDs, note clearing, SQL-looking text, CSV escaping, deletion,
-confirmation, export-to-import behavior, fresh imported IDs, atomic rejection of an
-invalid later row, malformed CSV shapes, and real CLI paths.
+confirmation, rejected deletion IDs with row preservation, export-to-import
+behavior, fresh imported IDs, atomic rejection of an invalid later row, malformed
+CSV shapes, and real CLI paths.
 
 A passing suite proves only the listed cases passed in that environment. It does
 not prove the absence of every bug, production performance, or security readiness.
 
-## 14. Current limitations
+## 15. Current limitations
 
 - Single local user; no accounts, authentication, or per-user authorization.
 - NGN only; the schema cannot safely mix currencies.
@@ -462,12 +530,26 @@ not prove the absence of every bug, production performance, or security readines
   normalization or separate UTF-8 byte limit.
 - No encryption; anyone who can read the database file can read its contents.
 - CSV export overwrites the target path.
+- A valid confirmed deletion is immediate and has no undo or audit record.
 - No API, browser interface, PostgreSQL, Docker, monitoring, or cloud deployment.
 - No measured production users, reliability, load, or business impact.
 
 These are scope boundaries, not hidden completed features.
 
-## 15. Interview questions and honest answers
+## 16. Interview questions and honest answers
+
+**Why does ID validation reject `True` before checking `int`?**
+`bool` inherits from `int` in Python, so `isinstance(True, int)` is true. The
+explicit boolean check prevents `True` from behaving like expense ID 1.
+
+**Why is parameterized SQL not enough for deletion safety?**
+Parameters stop a value from changing SQL syntax, but SQLite can still receive a
+value that violates the application's ID rules. Validation checks meaning;
+parameterization protects query structure.
+
+**Why validate before `delete()` opens its query connection?**
+Invalid input needs no database work. Failing early makes the control flow easier
+to reason about and proves destructive SQL was never reached.
 
 **Why validate the full CSV before inserting its first row?**
 It prevents a late bad row from leaving an incomplete import. Valid rows exist only
@@ -544,7 +626,7 @@ and API integration tests. Those features are not implemented here.
 Development used AI assistance. A truthful answer should distinguish generated or
 assisted implementation from the code personally studied, changed, and tested.
 
-## 16. Hands-on exercises
+## 17. Hands-on exercises
 
 Do these locally; reading alone is not practical mastery.
 
@@ -582,10 +664,17 @@ Write pseudocode for a future `POST /applications` FastAPI route. Mark which inp
 rules belong in an HTTP request model and which belong in reusable domain logic.
 Do not claim or deploy the API until its separate repository and tests exist.
 
-## 17. Readiness check
+### Exercise G — Prove deletion safety
 
-You understand Version 1.4 when you can run every command unaided, build a valid
-four-column CSV, trace `import_csv()` through both phases, explain why source IDs
-are ignored, predict the line number of a bad row, prove rejected input leaves the
-database untouched, make a small local change, observe a relevant test fail,
-restore the behavior, and return all 21 tests to green.
+Add one expense, then call `delete -1 --yes` and confirm it exits with an error.
+Run `show 1` to prove the row remains. Finally, explain why `True`, `"1"`, and `1`
+are three different inputs even though Python or SQLite may compare some of them
+similarly.
+
+## 18. Readiness check
+
+You understand Version 1.4.1 when you can run every command unaided, explain why
+`bool` is an `int` subclass but not a valid ID, distinguish validation from SQL
+parameterization, trace a rejected delete before `delete()` opens its query
+connection, prove the stored row remains, make a small local change, observe the
+deletion test fail, restore the behavior, and return all 22 tests to green.

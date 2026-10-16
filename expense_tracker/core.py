@@ -162,6 +162,7 @@ class ExpenseStore:
         return dict(sorted(totals.items()))
 
     def delete(self, expense_id):
+        expense_id = valid_expense_id(expense_id)
         with self.connect() as conn:
             cursor = conn.execute("DELETE FROM expenses WHERE id=?", (expense_id,))
             return cursor.rowcount > 0

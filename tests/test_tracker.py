@@ -163,11 +163,27 @@ class TrackerTests(unittest.TestCase):
         self.assertTrue(self.store.delete(record_id))
         self.assertFalse(self.store.delete(record_id))
 
+    def test_delete_rejects_invalid_ids_without_removing_a_row(self):
+        record_id = self.store.add("10", "food", "2026-10-01")
+        for invalid_id in (0, -1, True, "1"):
+            with self.subTest(invalid_id=invalid_id), self.assertRaisesRegex(
+                ValueError, "positive integer"
+            ):
+                self.store.delete(invalid_id)
+        self.assertIsNotNone(self.store.get(record_id))
+
     def test_cli_requires_delete_confirmation(self):
         record_id = self.store.add("10", "food", "2026-10-01")
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exc:
             main(["--db", str(self.db), "delete", str(record_id)])
         self.assertEqual(exc.exception.code, 2)
+        self.assertEqual(len(self.store.list()), 1)
+
+        error_output = io.StringIO()
+        with redirect_stderr(error_output), self.assertRaises(SystemExit) as exc:
+            main(["--db", str(self.db), "delete", "-1", "--yes"])
+        self.assertEqual(exc.exception.code, 2)
+        self.assertIn("Expense ID must be a positive integer.", error_output.getvalue())
         self.assertEqual(len(self.store.list()), 1)
 
     def test_cli_add_and_summary(self):

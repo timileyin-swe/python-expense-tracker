@@ -1,5 +1,46 @@
 # Development log
 
+## 2026-10-16 — Validate deletion IDs before SQL
+
+### Completed
+
+- Reused `valid_expense_id()` at the start of `ExpenseStore.delete()` so deletion
+  now follows the same positive-integer contract as `get()` and `update()`.
+- Rejected booleans explicitly even though Python treats `bool` as an `int`
+  subclass, and rejected numeric-looking strings instead of relying on SQLite
+  type conversion.
+- Ensured validation happens before `delete()` opens its query connection or
+  prepares a `DELETE` statement.
+- Kept the existing missing-record behavior: a valid but absent ID still returns
+  `False`, while malformed IDs raise `ValueError`.
+- Updated the README, study guide, and development plan to Version 1.4.1.
+
+### Tested
+
+- `python -m compileall -q expense_tracker tests`: completed successfully.
+- Three targeted deletion tests passed.
+- `python -m unittest discover -s tests -v`: 22 tests passed.
+- Verified direct deletion rejects `0`, `-1`, `True`, and `"1"`, then proved the
+  original row still exists.
+- Verified `delete -1 --yes` exits with status 2, prints the positive-integer rule,
+  and leaves the stored row unchanged.
+- Ran add/rejected-delete/show/confirmed-delete/list end to end: the rejected
+  command preserved expense 1, the confirmed valid command removed it, and the
+  final list was empty.
+
+### Pending
+
+- Hands-on learner completion of the Version 1.4.1 deletion exercise.
+- The separate job-application API, followed later by PostgreSQL, queues, Docker,
+  monitoring, an AI document assistant, and optional cloud deployment.
+
+### Blocked
+
+- Publishing the prepared job-application API remains blocked: the intended
+  repository still does not exist, repository creation is absent from the
+  connected GitHub actions, and no connected browser session was available.
+  No unrelated repository was modified.
+
 ## 2026-10-15 — Atomic CSV import
 
 ### Completed

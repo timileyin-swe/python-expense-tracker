@@ -57,7 +57,8 @@ All amounts use NGN; currencies cannot be mixed.
   anything. Errors identify the CSV line, and imported source IDs are ignored.
 - `format_expense()` gives `list`, `show`, and `update` one shared output format.
 - CSV text fields are protected against common spreadsheet formula prefixes.
-- Deletion requires explicit confirmation: `python -m expense_tracker delete 1 --yes`.
+- Deletion validates a positive integer ID before SQL and requires explicit
+  confirmation: `python -m expense_tracker delete 1 --yes`.
 
 ## Test
 
@@ -65,11 +66,11 @@ All amounts use NGN; currencies cannot be mixed.
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains 21 tests. It uses temporary databases and covers
+The current suite contains 22 tests. It uses temporary databases and covers
 persistence, exact money, invalid input, category and note length boundaries,
 monthly totals, single-record lookup, partial updates, rejected updates, CSV
 export, atomic CSV import, malformed files, SQL-looking notes, deletion
-confirmation, and CLI commands.
+confirmation, rejected deletion IDs, and CLI commands.
 
 ## Learn the project
 

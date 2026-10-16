@@ -12,6 +12,8 @@
 - Version 1.4: import either the documented four-column CSV format or this app's
   exported five-column format, validate every row before writing, report invalid
   line numbers, and generate fresh local IDs.
+- Version 1.4.1: validate deletion IDs before `delete()` opens its query
+  connection so booleans, strings, zero, and negative values cannot reach SQL.
 
 ## Next small milestones
 
