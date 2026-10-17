@@ -1,5 +1,44 @@
 # Development log
 
+## 2026-10-17 — Reject malformed CSV syntax atomically
+
+### Completed
+
+- Enabled strict parsing in `csv.DictReader` so an unclosed quoted field raises
+  `csv.Error` instead of being accepted as ordinary note text.
+- Converted parser failures into the import method's public `ValueError` contract
+  with a clear `CSV line N: malformed CSV` message.
+- Reported the physical failing line from the underlying CSV reader, including
+  failures that interrupt `DictReader` before it updates its own line counter.
+- Preserved the two-phase design: syntax parsing and row validation still finish
+  before the database insert transaction begins.
+- Updated the README, study guide, and development plan to Version 1.4.2.
+
+### Tested
+
+- `python -m compileall -q expense_tracker tests`: completed successfully.
+- Five targeted import tests passed.
+- `python -m unittest discover -s tests -v`: 23 tests passed.
+- Verified a file with a valid line 2 and an unclosed quote on line 3 reports line
+  3, imports neither CSV row, and preserves the destination's original row.
+- Re-ran export round-trip, bad-header, extra-field, invalid-value, UTF-8 BOM, and
+  CLI import coverage to guard against regressions.
+- Rehearsed the installed CLI against a temporary database: `add` created expense
+  #1, malformed `import` exited with status 2 and named line 3, and both `show 1`
+  and `list` confirmed the original expense was the only stored row.
+
+### Pending
+
+- Hands-on learner completion of the Version 1.4.2 malformed-CSV exercise.
+- The separate job-application API, followed later by PostgreSQL, queues, Docker,
+  monitoring, an AI document assistant, and optional cloud deployment.
+
+### Blocked
+
+- Publishing the prepared job-application API remains blocked: the intended
+  repository still does not exist and repository creation is unavailable through
+  the connected GitHub actions. No unrelated repository was modified.
+
 ## 2026-10-16 — Validate deletion IDs before SQL
 
 ### Completed

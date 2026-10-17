@@ -158,6 +158,18 @@ class TrackerTests(unittest.TestCase):
             self.store.import_csv(path)
         self.assertEqual(self.store.list(), [])
 
+    def test_import_rejects_malformed_quotes_atomically(self):
+        existing_id = self.store.add("5", "transport", "2026-09-30")
+        path = Path(self.temp.name) / "malformed.csv"
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            handle.write("amount_ngn,category,date,note\n")
+            handle.write("12.50,food,2026-10-01,Lunch\n")
+            handle.write('20,data,2026-10-02,"unfinished note\n')
+
+        with self.assertRaisesRegex(ValueError, "CSV line 3: malformed CSV"):
+            self.store.import_csv(path)
+        self.assertEqual([row["id"] for row in self.store.list()], [existing_id])
+
     def test_delete_and_missing_record(self):
         record_id = self.store.add("10", "food", "2026-10-01")
         self.assertTrue(self.store.delete(record_id))

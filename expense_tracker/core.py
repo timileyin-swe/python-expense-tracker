@@ -183,27 +183,34 @@ class ExpenseStore:
         """Validate a CSV completely, then insert all rows in one transaction."""
         records = []
         with open(path, encoding="utf-8-sig", newline="") as handle:
-            reader = csv.DictReader(handle)
-            if reader.fieldnames not in (IMPORT_COLUMNS, EXPORT_COLUMNS):
-                expected = ",".join(IMPORT_COLUMNS)
-                raise ValueError(
-                    f"CSV header must be {expected}, with an optional leading id column."
-                )
-            for row in reader:
-                line_number = reader.line_num
-                if None in row or any(row[column] is None for column in IMPORT_COLUMNS):
+            reader = csv.DictReader(handle, strict=True)
+            try:
+                if reader.fieldnames not in (IMPORT_COLUMNS, EXPORT_COLUMNS):
+                    expected = ",".join(IMPORT_COLUMNS)
                     raise ValueError(
-                        f"CSV line {line_number}: expected exactly {len(reader.fieldnames)} fields."
+                        f"CSV header must be {expected}, with an optional leading id column."
                     )
-                try:
-                    records.append((
-                        money_to_kobo(row["amount_ngn"]),
-                        normalize_category(row["category"]),
-                        valid_date(row["date"]),
-                        normalize_note(row["note"]),
-                    ))
-                except ValueError as exc:
-                    raise ValueError(f"CSV line {line_number}: {exc}") from exc
+                for row in reader:
+                    line_number = reader.line_num
+                    if None in row or any(row[column] is None for column in IMPORT_COLUMNS):
+                        raise ValueError(
+                            f"CSV line {line_number}: expected exactly "
+                            f"{len(reader.fieldnames)} fields."
+                        )
+                    try:
+                        records.append((
+                            money_to_kobo(row["amount_ngn"]),
+                            normalize_category(row["category"]),
+                            valid_date(row["date"]),
+                            normalize_note(row["note"]),
+                        ))
+                    except ValueError as exc:
+                        raise ValueError(f"CSV line {line_number}: {exc}") from exc
+            except csv.Error as exc:
+                line_number = reader.reader.line_num or reader.line_num or 1
+                raise ValueError(
+                    f"CSV line {line_number}: malformed CSV: {exc}."
+                ) from exc
 
         with self.connect() as conn:
             conn.executemany(

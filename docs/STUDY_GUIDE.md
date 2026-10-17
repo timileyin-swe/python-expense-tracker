@@ -1,4 +1,4 @@
-# Python Expense Tracker — Version 1.4.1 Study Guide
+# Python Expense Tracker — Version 1.4.2 Study Guide
 
 ## 1. What this project does
 
@@ -55,7 +55,7 @@ implemented.
 | `list` | Retrieve matching expenses | Newest date and ID first |
 | `summary` | Add amounts by category | Prints category totals and grand total |
 | `export PATH` | Write matching rows to CSV | Overwrites the destination file |
-| `import PATH` | Validate and insert every CSV row | Writes all rows or none |
+| `import PATH` | Strictly parse, validate, and insert CSV | Writes all rows or none |
 | `delete ID --yes` | Permanently remove a row | Requires a positive ID and confirmation |
 
 `--month YYYY-MM` works with `list`, `summary`, and `export`.
@@ -85,7 +85,77 @@ terminal text -> argparse -> main() -> ExpenseStore -> SQLite file
 This separation is enough for a small project. A larger service would normally
 split request models, business services, repositories, migrations, and logging.
 
-## 5. What changed in Version 1.4.1
+## 5. What changed in Version 1.4.2
+
+Version 1.4.2 closes a CSV syntax gap in the atomic importer. Python's CSV reader
+is permissive by default. For example, a final field that starts with `"` but
+never closes can be returned as text instead of being rejected. That can hide a
+damaged file and import data different from what the author intended.
+
+### Strict parsing and the public error contract
+
+`ExpenseStore.import_csv()` now constructs its reader with strict mode:
+
+```python
+reader = csv.DictReader(handle, strict=True)
+```
+
+Strict mode makes malformed quote structure raise `csv.Error`. The storage method
+catches that parser-specific exception and converts it to the same `ValueError`
+family already used for invalid amounts, dates, categories, notes, and row shapes:
+
+```python
+except csv.Error as exc:
+    line_number = reader.reader.line_num or reader.line_num or 1
+    raise ValueError(
+        f"CSV line {line_number}: malformed CSV: {exc}."
+    ) from exc
+```
+
+The CLI already catches `ValueError`, so users receive a normal command error and
+exit status 2 instead of a raw Python traceback. `from exc` preserves the original
+`csv.Error` as the exception cause for debugging.
+
+### Why two line counters appear
+
+`DictReader` wraps a lower-level CSV reader. After a successful row,
+`reader.line_num` contains its physical line number. If parsing fails inside the
+wrapped reader, `DictReader` may not get far enough to copy the new number to its
+own property. `reader.reader.line_num` therefore supplies the current physical
+line during a parser failure. The fallbacks still produce line 1 for an unusual
+error before either reader has counted input.
+
+This is intentionally a physical line number, not merely “record 2.” A quoted
+field is allowed to span multiple physical lines, so the distinction matters when
+someone opens the CSV in a text editor to repair it.
+
+### Failure trace: unclosed quoted field
+
+Assume the file contains a valid header, a valid expense on line 2, and this line:
+
+```text
+20,data,2026-10-02,"unfinished note
+```
+
+1. The line-2 expense is validated and stored only as a tuple in `records`.
+2. The strict reader starts line 3, sees the opening quote, and reaches the end of
+   the file without a closing quote.
+3. The CSV module raises `csv.Error("unexpected end of data")`.
+4. `import_csv()` reports `CSV line 3: malformed CSV: unexpected end of data.`
+5. Execution leaves the file-reading phase before `self.connect()` or
+   `executemany()` is reached.
+6. The regression test proves the destination still contains only the row that
+   existed before import; even the valid CSV row on line 2 was not inserted.
+
+### Design decision
+
+The parser error is handled inside `import_csv()` rather than in the CLI. That
+keeps the storage API safe for terminal commands, tests, and a future HTTP API.
+Strict syntax checking complements the existing semantic checks: the CSV reader
+checks structure, while functions such as `money_to_kobo()` and `valid_date()`
+check what each field means.
+
+## 6. What changed in Version 1.4.1
 
 Version 1.4.1 is a small deletion-safety patch. `get()` and `update()` already
 required a positive integer ID, but `delete()` previously sent its argument
@@ -152,7 +222,7 @@ For `python -m expense_tracker --db practice.db delete -1 --yes`:
 This patch deliberately adds no new command. It strengthens an existing contract,
 which is valuable maintenance work even though the production change is one line.
 
-## 6. What changed in Version 1.4
+## 7. What changed in Version 1.4
 
 Version 1.4 adds an atomic CSV import path. “Atomic” means one import is treated as
 a unit: all valid rows are stored, or an error leaves the database unchanged. The
@@ -232,7 +302,7 @@ Exact headers make accidental column swaps visible instead of guessing. Holding
 the prepared rows in memory keeps the beginner implementation clear, but it also
 means this version is intended for small personal files rather than huge imports.
 
-## 7. What changed in Version 1.3
+## 8. What changed in Version 1.3
 
 Version 1.3 adds a partial-update path. A user chooses one or more of `--amount`,
 `--category`, `--date`, and `--note`; every omitted field keeps its existing value.
@@ -309,7 +379,7 @@ If any supplied value is invalid, validation raises before the update statement.
 If no flags are supplied, the empty `changes` dictionary is rejected. Tests verify
 that the original row remains unchanged after each rejected attempt.
 
-## 8. What changed in Version 1.2
+## 9. What changed in Version 1.2
 
 Version 1.2 turns two documented input limits into executable contracts. No
 runtime function changed: `ExpenseStore.add()` already enforced the limits. The
@@ -355,7 +425,7 @@ For `maximum_category = "A" * 50`:
 For `"b" * 51`, the length check is true. `add()` raises `ValueError` before the
 `INSERT`, and the final row-count assertion proves that no partial record appeared.
 
-## 9. What changed in Version 1.1
+## 10. What changed in Version 1.1
 
 ### `ExpenseStore.get(expense_id)`
 
@@ -400,7 +470,7 @@ Two tests were added:
 The suite had 12 tests at Version 1.1, 14 after Version 1.2, and 17 after
 Version 1.3.
 
-## 10. Execution trace: `show 1`
+## 11. Execution trace: `show 1`
 
 Assume expense 1 already exists.
 
@@ -424,7 +494,7 @@ Observed output from the tested practice run:
 For `show 999`, the observed message was `Expense ID not found.` and the process
 returned status 2. That nonzero status lets scripts distinguish success from error.
 
-## 11. Trace an added expense
+## 12. Trace an added expense
 
 For `python -m expense_tracker --db practice.db add 4500 groceries`:
 
@@ -440,7 +510,7 @@ For `python -m expense_tracker --db practice.db add 4500 groceries`:
 Predict each value before running the command. That is more useful than memorizing
 the final code.
 
-## 12. Core Python functions and decisions
+## 13. Core Python functions and decisions
 
 ### `money_to_kobo(value)`
 
@@ -466,7 +536,7 @@ formula. The function prefixes an apostrophe when a user-controlled category or
 note begins with such a character after whitespace. This is a conservative export
 defense; spreadsheet behavior still varies.
 
-## 13. Classes, state, and SQLite
+## 14. Classes, state, and SQLite
 
 `ExpenseStore` is a class. Each instance stores its database path in `self.path`.
 `self` means the particular object on which a method was called.
@@ -488,7 +558,7 @@ context handles transactions, and the helper closes each connection.
 All SQL values use `?` placeholders. Never replace them with string interpolation.
 A note that looks like SQL remains data rather than becoming a command.
 
-## 14. Tests and verified behavior
+## 15. Tests and verified behavior
 
 Run:
 
@@ -496,10 +566,10 @@ Run:
 python -m unittest discover -s tests -v
 ```
 
-The 2026-10-16 milestone run reported:
+The 2026-10-17 milestone run reported:
 
 ```text
-Ran 22 tests
+Ran 23 tests
 OK
 ```
 
@@ -509,13 +579,13 @@ money conversion, rejected money and dates, exact 50/51-character category and
 filtering and totals, single-record lookup, valid partial updates, rejected updates,
 missing update IDs, note clearing, SQL-looking text, CSV escaping, deletion,
 confirmation, rejected deletion IDs with row preservation, export-to-import
-behavior, fresh imported IDs, atomic rejection of an invalid later row, malformed
-CSV shapes, and real CLI paths.
+behavior, fresh imported IDs, atomic rejection of an invalid later value,
+malformed CSV shapes and quote syntax, and real CLI paths.
 
 A passing suite proves only the listed cases passed in that environment. It does
 not prove the absence of every bug, production performance, or security readiness.
 
-## 15. Current limitations
+## 16. Current limitations
 
 - Single local user; no accounts, authentication, or per-user authorization.
 - NGN only; the schema cannot safely mix currencies.
@@ -536,7 +606,20 @@ not prove the absence of every bug, production performance, or security readines
 
 These are scope boundaries, not hidden completed features.
 
-## 16. Interview questions and honest answers
+## 17. Interview questions and honest answers
+
+**Why enable strict CSV parsing?**
+Permissive parsing can turn broken quote syntax into unexpected text. Strict mode
+fails visibly, letting the user repair the file instead of silently importing it.
+
+**Why catch `csv.Error` and raise `ValueError`?**
+`csv.Error` describes the low-level parser. `ValueError` is the storage method's
+existing invalid-input contract, which the CLI already converts into a clear
+command error. Exception chaining retains the technical cause.
+
+**Why read the underlying reader's line number after a parser failure?**
+The wrapper updates its own counter only after a row succeeds. A failure can occur
+first, while the underlying reader has already reached the bad physical line.
 
 **Why does ID validation reject `True` before checking `int`?**
 `bool` inherits from `int` in Python, so `isinstance(True, int)` is true. The
@@ -626,7 +709,7 @@ and API integration tests. Those features are not implemented here.
 Development used AI assistance. A truthful answer should distinguish generated or
 assisted implementation from the code personally studied, changed, and tested.
 
-## 17. Hands-on exercises
+## 18. Hands-on exercises
 
 Do these locally; reading alone is not practical mastery.
 
@@ -671,10 +754,17 @@ Run `show 1` to prove the row remains. Finally, explain why `True`, `"1"`, and `
 are three different inputs even though Python or SQLite may compare some of them
 similarly.
 
-## 18. Readiness check
+### Exercise H — Break and repair a CSV
 
-You understand Version 1.4.1 when you can run every command unaided, explain why
-`bool` is an `int` subclass but not a valid ID, distinguish validation from SQL
-parameterization, trace a rejected delete before `delete()` opens its query
-connection, prove the stored row remains, make a small local change, observe the
-deletion test fail, restore the behavior, and return all 22 tests to green.
+Create a four-column CSV with one valid row and a second row whose note begins with
+a quote but never closes. Predict the error line, run `import`, and prove `list`
+contains no imported rows. Add the closing quote, import again, and explain why
+both rows now commit together.
+
+## 19. Readiness check
+
+You understand Version 1.4.2 when you can run every command unaided, distinguish
+CSV syntax validation from field validation, explain `strict=True`, trace an
+unclosed quote to a line-specific error, prove the valid earlier CSV row was not
+inserted, repair the file, make a small local change, observe the malformed-CSV
+test fail, restore the behavior, and return all 23 tests to green.

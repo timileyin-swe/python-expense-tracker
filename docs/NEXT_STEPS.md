@@ -14,6 +14,8 @@
   line numbers, and generate fresh local IDs.
 - Version 1.4.1: validate deletion IDs before `delete()` opens its query
   connection so booleans, strings, zero, and negative values cannot reach SQL.
+- Version 1.4.2: enable strict CSV parsing so broken quoted fields fail with their
+  physical line number before the atomic import reaches SQLite.
 
 ## Next small milestones
 

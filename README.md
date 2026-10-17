@@ -54,7 +54,8 @@ All amounts use NGN; currencies cannot be mixed.
 - `ExpenseStore.update()` validates every supplied field before one parameterized
   update and preserves fields that were not selected.
 - `ExpenseStore.import_csv()` validates every row before one transaction inserts
-  anything. Errors identify the CSV line, and imported source IDs are ignored.
+  anything. Strict parsing rejects malformed quotes, errors identify the physical
+  CSV line, and imported source IDs are ignored.
 - `format_expense()` gives `list`, `show`, and `update` one shared output format.
 - CSV text fields are protected against common spreadsheet formula prefixes.
 - Deletion validates a positive integer ID before SQL and requires explicit
@@ -66,11 +67,11 @@ All amounts use NGN; currencies cannot be mixed.
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains 22 tests. It uses temporary databases and covers
+The current suite contains 23 tests. It uses temporary databases and covers
 persistence, exact money, invalid input, category and note length boundaries,
 monthly totals, single-record lookup, partial updates, rejected updates, CSV
-export, atomic CSV import, malformed files, SQL-looking notes, deletion
-confirmation, rejected deletion IDs, and CLI commands.
+export, atomic CSV import, malformed headers, fields and quoted syntax,
+SQL-looking notes, deletion confirmation, rejected deletion IDs, and CLI commands.
 
 ## Learn the project
 
