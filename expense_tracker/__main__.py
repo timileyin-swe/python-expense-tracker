@@ -34,6 +34,7 @@ def main(argv=None):
     for name in ("list", "summary", "export"):
         command = commands.add_parser(name)
         command.add_argument("--month", help="Filter using YYYY-MM")
+        command.add_argument("--category", help="Filter by exact category")
         if name == "export":
             command.add_argument("path")
     import_command = commands.add_parser("import", help="Import expenses from CSV")
@@ -64,18 +65,20 @@ def main(argv=None):
                 parser.error("Expense ID not found.")
             print(f"Updated {format_expense(row)}")
         elif args.command == "list":
-            rows = store.list(args.month)
+            rows = store.list(args.month, args.category)
             if not rows:
                 print("No expenses found.")
             for row in rows:
                 print(format_expense(row))
         elif args.command == "summary":
-            totals = store.summary(args.month)
+            totals = store.summary(args.month, args.category)
             for category, kobo in totals.items():
                 print(f"{category}: {format_money(kobo)}")
             print(f"TOTAL: {format_money(sum(totals.values()))}")
         elif args.command == "export":
-            print(f"Exported {store.export(args.path, args.month)} expenses.")
+            print(
+                f"Exported {store.export(args.path, args.month, args.category)} expenses."
+            )
         elif args.command == "import":
             print(f"Imported {store.import_csv(args.path)} expenses.")
         elif args.command == "delete":

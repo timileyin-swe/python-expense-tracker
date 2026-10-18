@@ -143,20 +143,26 @@ class ExpenseStore:
                 "SELECT * FROM expenses WHERE id=?", (expense_id,)
             ).fetchone()
 
-    def list(self, month=None):
+    def list(self, month=None, category=None):
+        conditions = []
+        parameters = []
         if month is not None:
-            valid_month(month)
-        with self.connect() as conn:
-            return conn.execute(
-                "SELECT * FROM expenses" +
-                (" WHERE substr(spent_on,1,7)=?" if month else "") +
-                " ORDER BY spent_on DESC,id DESC",
-                (month,) if month else (),
-            ).fetchall()
+            conditions.append("substr(spent_on,1,7)=?")
+            parameters.append(valid_month(month))
+        if category is not None:
+            conditions.append("category=?")
+            parameters.append(normalize_category(category))
 
-    def summary(self, month=None):
+        query = "SELECT * FROM expenses"
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY spent_on DESC,id DESC"
+        with self.connect() as conn:
+            return conn.execute(query, parameters).fetchall()
+
+    def summary(self, month=None, category=None):
         totals = {}
-        for row in self.list(month):
+        for row in self.list(month, category):
             category = row["category"]
             totals[category] = totals.get(category, 0) + row["amount_kobo"]
         return dict(sorted(totals.items()))
@@ -167,8 +173,8 @@ class ExpenseStore:
             cursor = conn.execute("DELETE FROM expenses WHERE id=?", (expense_id,))
             return cursor.rowcount > 0
 
-    def export(self, path, month=None):
-        rows = self.list(month)
+    def export(self, path, month=None, category=None):
+        rows = self.list(month, category)
         with open(path, "w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerow(EXPORT_COLUMNS)

@@ -55,6 +55,26 @@ class TrackerTests(unittest.TestCase):
         self.assertEqual(len(reopened.list()), 3)
         self.assertEqual(reopened.list()[0]["spent_on"], "2026-10-02")
 
+    def test_category_filter_normalizes_and_combines_with_month(self):
+        october_food = self.store.add("10", " Food ", "2026-10-02", "Lunch")
+        self.store.add("20", "food", "2026-09-30", "Breakfast")
+        self.store.add("30", "data", "2026-10-03", "Weekly plan")
+
+        rows = self.store.list(month="2026-10", category=" FOOD ")
+        self.assertEqual([row["id"] for row in rows], [october_food])
+        self.assertEqual(self.store.summary(category="Food"), {"food": 3000})
+
+        path = Path(self.temp.name) / "food-october.csv"
+        self.assertEqual(
+            self.store.export(path, month="2026-10", category="food"), 1
+        )
+        with path.open(newline="", encoding="utf-8") as handle:
+            exported = list(csv.DictReader(handle))
+        self.assertEqual([row["note"] for row in exported], ["Lunch"])
+
+        with self.assertRaisesRegex(ValueError, "1 to 50 characters"):
+            self.store.list(category="   ")
+
     def test_get_existing_missing_and_invalid_id(self):
         record_id = self.store.add("25.50", "data", "2026-10-12", "Night plan")
         row = self.store.get(record_id)
@@ -204,6 +224,41 @@ class TrackerTests(unittest.TestCase):
             main(["--db", str(self.db), "add", "1500", "food", "--date", "2026-10-12"])
             main(["--db", str(self.db), "summary", "--month", "2026-10"])
         self.assertIn("TOTAL: NGN 1,500.00", output.getvalue())
+
+    def test_cli_category_filter_for_list_summary_and_export(self):
+        food_id = self.store.add("1500", "food", "2026-10-12", "Lunch")
+        self.store.add("700", "data", "2026-10-12", "Weekly plan")
+        self.store.add("500", "food", "2026-09-30", "Breakfast")
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            main([
+                "--db", str(self.db), "list", "--month", "2026-10",
+                "--category", " FOOD ",
+            ])
+        self.assertIn(f"#{food_id} | 2026-10-12 | NGN 1,500.00", output.getvalue())
+        self.assertNotIn("data", output.getvalue())
+        self.assertNotIn("Breakfast", output.getvalue())
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            main(["--db", str(self.db), "summary", "--category", "food"])
+        self.assertEqual(
+            output.getvalue().strip(),
+            "food: NGN 2,000.00\nTOTAL: NGN 2,000.00",
+        )
+
+        path = Path(self.temp.name) / "filtered.csv"
+        output = io.StringIO()
+        with redirect_stdout(output):
+            main([
+                "--db", str(self.db), "export", str(path),
+                "--month", "2026-10", "--category", "food",
+            ])
+        self.assertEqual(output.getvalue().strip(), "Exported 1 expenses.")
+        with path.open(newline="", encoding="utf-8") as handle:
+            exported = list(csv.DictReader(handle))
+        self.assertEqual([row["note"] for row in exported], ["Lunch"])
 
     def test_cli_show_and_missing_id(self):
         record_id = self.store.add("1500", "food", "2026-10-12", "Lunch")

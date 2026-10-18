@@ -16,6 +16,8 @@
   connection so booleans, strings, zero, and negative values cannot reach SQL.
 - Version 1.4.2: enable strict CSV parsing so broken quoted fields fail with their
   physical line number before the atomic import reaches SQLite.
+- Version 1.5: filter `list`, `summary`, and `export` by an exact normalized
+  category, independently or together with the existing month filter.
 
 ## Next small milestones
 

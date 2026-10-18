@@ -1,9 +1,9 @@
 # Python Expense Tracker
 
 A local command-line application for recording NGN expenses, finding one expense
-by ID, filtering by month, viewing category totals, and importing or exporting CSV
-files. Built as a learning portfolio project using Python's standard library; no
-external packages are required.
+by ID, filtering by month and category, viewing category totals, and importing or
+exporting CSV files. Built as a learning portfolio project using Python's standard
+library; no external packages are required.
 
 ## Quick start
 
@@ -15,9 +15,9 @@ python -m expense_tracker --db practice.db add 4500 groceries --date 2026-10-14 
 python -m expense_tracker --db practice.db add 2000 data --date 2026-10-14 --note "Weekly mobile data"
 python -m expense_tracker --db practice.db update 1 --amount 5200.50 --category household --note ""
 python -m expense_tracker --db practice.db show 1
-python -m expense_tracker --db practice.db list
-python -m expense_tracker --db practice.db summary --month 2026-10
-python -m expense_tracker --db practice.db export expenses.csv --month 2026-10
+python -m expense_tracker --db practice.db list --month 2026-10 --category household
+python -m expense_tracker --db practice.db summary --category household
+python -m expense_tracker --db practice.db export expenses.csv --month 2026-10 --category household
 python -m expense_tracker --db restored.db import expenses.csv
 ```
 
@@ -53,6 +53,9 @@ All amounts use NGN; currencies cannot be mixed.
   present a missing record to a user.
 - `ExpenseStore.update()` validates every supplied field before one parameterized
   update and preserves fields that were not selected.
+- `ExpenseStore.list()` builds optional month and category conditions from
+  hard-coded SQL fragments while keeping filter values in parameters. `summary()`
+  and `export()` reuse the same filtering path.
 - `ExpenseStore.import_csv()` validates every row before one transaction inserts
   anything. Strict parsing rejects malformed quotes, errors identify the physical
   CSV line, and imported source IDs are ignored.
@@ -67,10 +70,10 @@ All amounts use NGN; currencies cannot be mixed.
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains 23 tests. It uses temporary databases and covers
+The current suite contains 25 tests. It uses temporary databases and covers
 persistence, exact money, invalid input, category and note length boundaries,
-monthly totals, single-record lookup, partial updates, rejected updates, CSV
-export, atomic CSV import, malformed headers, fields and quoted syntax,
+month/category filters and totals, single-record lookup, partial updates, rejected
+updates, filtered CSV export, atomic CSV import, malformed headers, fields and quoted syntax,
 SQL-looking notes, deletion confirmation, rejected deletion IDs, and CLI commands.
 
 ## Learn the project
@@ -83,7 +86,8 @@ future milestones without presenting them as finished features.
 ## Scope and limitations
 
 This is a single-user local CLI, with no web interface, authentication, encryption,
-or cloud deployment. CSV export overwrites the specified output file. CSV import
+or cloud deployment. Category filtering is an exact normalized match, not partial
+or fuzzy search. CSV export overwrites the specified output file. CSV import
 accepts only its documented headers, generates new IDs, and does not detect
 duplicates. Back up the SQLite file while the application is closed. Deletion has
 no undo. Do not commit personal spending records; database and CSV files are

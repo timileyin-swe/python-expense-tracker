@@ -1,5 +1,46 @@
 # Development log
 
+## 2026-10-18 — Filter by normalized category
+
+### Completed
+
+- Added an optional category filter to `ExpenseStore.list()`, with the same
+  trimming, lowercasing, and length validation used when categories are stored.
+- Supported month-only, category-only, and combined month/category selection
+  without changing the behavior of unfiltered calls.
+- Built the query from hard-coded condition fragments while keeping month and
+  category values in SQLite parameters.
+- Reused the filtered `list()` path from `summary()` and `export()` so displayed,
+  totaled, and exported records follow one selection rule.
+- Added `--category` to the `list`, `summary`, and `export` commands and updated
+  the README, study guide, and development plan to Version 1.5.
+
+### Tested
+
+- `python -m compileall -q expense_tracker tests`: completed successfully.
+- Two focused category-filter tests passed.
+- `python -m unittest discover -s tests -v`: 25 tests passed.
+- Verified normalization of `" FOOD "`, category-only totals, a combined month
+  and category filter, filtered CSV contents, and rejection of an empty category.
+- Rehearsed the CLI with three expenses across two categories and two months:
+  combined `list` returned only October food, category `summary` totaled both food
+  rows at NGN 2,000.00, and combined `export` wrote only the October food row.
+
+### Pending
+
+- Hands-on learner completion of the Version 1.5 combined-filter exercise.
+- Continue the separate job-application API after functions, modules, and
+  exceptions have been demonstrated through hands-on Python work.
+- Later progression to PostgreSQL, queues, Docker, monitoring, an AI document
+  assistant, and optional cloud deployment.
+
+### Blocked
+
+- Publishing the prepared job-application API remains blocked: its intended
+  repository still does not exist and repository creation is unavailable through
+  the connected GitHub actions. Its starter bundle remains preserved separately;
+  no unrelated repository was modified.
+
 ## 2026-10-17 — Reject malformed CSV syntax atomically
 
 ### Completed

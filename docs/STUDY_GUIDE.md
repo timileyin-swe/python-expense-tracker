@@ -1,4 +1,4 @@
-# Python Expense Tracker — Version 1.4.2 Study Guide
+# Python Expense Tracker — Version 1.5 Study Guide
 
 ## 1. What this project does
 
@@ -8,7 +8,7 @@ SQLite database, and lets a user:
 - add an expense;
 - show one expense by its unique ID;
 - update selected fields on an existing expense;
-- list all expenses or one month's expenses;
+- list all expenses or filter them by month, category, or both;
 - summarize spending by category;
 - export selected records to CSV;
 - import validated CSV records atomically; and
@@ -28,8 +28,9 @@ python -m expense_tracker --db practice.db add 4500 groceries --date 2026-10-14 
 python -m expense_tracker --db practice.db add 2000 data --date 2026-10-14 --note "Weekly mobile data"
 python -m expense_tracker --db practice.db update 1 --amount 5200.50 --category household --note ""
 python -m expense_tracker --db practice.db show 1
-python -m expense_tracker --db practice.db list
+python -m expense_tracker --db practice.db list --month 2026-10 --category household
 python -m expense_tracker --db practice.db summary --month 2026-10
+python -m expense_tracker --db practice.db summary --month 2026-10 --category household
 python -m expense_tracker --db practice.db export practice.csv --month 2026-10
 python -m expense_tracker --db restored.db import practice.csv
 python -m expense_tracker --db restored.db summary --month 2026-10
@@ -52,13 +53,15 @@ implemented.
 | `add AMOUNT CATEGORY` | Validate and save one expense | Prints its generated ID |
 | `show ID` | Retrieve exactly one expense | Prints one row or exits with status 2 |
 | `update ID [OPTIONS]` | Change only selected fields | Prints the updated row |
-| `list` | Retrieve matching expenses | Newest date and ID first |
-| `summary` | Add amounts by category | Prints category totals and grand total |
-| `export PATH` | Write matching rows to CSV | Overwrites the destination file |
+| `list` | Retrieve expenses matching optional filters | Newest date and ID first |
+| `summary` | Add matching amounts by category | Prints category totals and grand total |
+| `export PATH` | Write filtered rows to CSV | Overwrites the destination file |
 | `import PATH` | Strictly parse, validate, and insert CSV | Writes all rows or none |
 | `delete ID --yes` | Permanently remove a row | Requires a positive ID and confirmation |
 
-`--month YYYY-MM` works with `list`, `summary`, and `export`.
+`--month YYYY-MM` and `--category CATEGORY` work independently or together with
+`list`, `summary`, and `export`. Category matching is exact after the same trimming
+and lowercasing used when an expense is added.
 
 ## 4. Project architecture
 
@@ -85,7 +88,95 @@ terminal text -> argparse -> main() -> ExpenseStore -> SQLite file
 This separation is enough for a small project. A larger service would normally
 split request models, business services, repositories, migrations, and logging.
 
-## 5. What changed in Version 1.4.2
+## 5. What changed in Version 1.5
+
+Version 1.5 adds one consistent category filter to three existing commands. A user
+can now select one normalized category with `list`, calculate only that category
+with `summary`, or write only its rows with `export`. The category filter can be
+used alone or combined with `--month`.
+
+```sh
+python -m expense_tracker --db practice.db list --category " Household "
+python -m expense_tracker --db practice.db summary --month 2026-10 --category household
+python -m expense_tracker --db practice.db export household.csv --month 2026-10 --category household
+```
+
+### Changed functions and CLI wiring
+
+- `ExpenseStore.list(month=None, category=None)` now accepts both optional filters.
+- `ExpenseStore.summary(month=None, category=None)` passes both filters to
+  `list()` instead of implementing a separate selection rule.
+- `ExpenseStore.export(path, month=None, category=None)` does the same before
+  writing CSV.
+- `main()` adds `--category` to the `list`, `summary`, and `export` parsers and
+  forwards the parsed value.
+
+Older calls such as `store.list()` and `store.list("2026-10")` still behave as
+before because both optional parameters default to `None`.
+
+### Building one safe query from optional conditions
+
+`list()` starts with two empty lists:
+
+```python
+conditions = []
+parameters = []
+```
+
+If a month is supplied, the method validates it and appends a hard-coded SQL
+condition plus its value. If a category is supplied, `normalize_category()` trims
+and lowercases it, then appends another hard-coded condition and value. Only the
+program's fixed condition text becomes part of the SQL string:
+
+```python
+if month is not None:
+    conditions.append("substr(spent_on,1,7)=?")
+    parameters.append(valid_month(month))
+if category is not None:
+    conditions.append("category=?")
+    parameters.append(normalize_category(category))
+```
+
+When both filters exist, `" AND ".join(conditions)` produces this query shape:
+
+```sql
+SELECT * FROM expenses
+WHERE substr(spent_on,1,7)=? AND category=?
+ORDER BY spent_on DESC,id DESC
+```
+
+The month and category never get inserted into the SQL text. They remain separate
+values in `parameters`, so SQLite treats them as data. Dynamic query construction
+is safe here because the possible SQL fragments are written by the program, not
+provided by the user.
+
+### Execution trace: combined month and category filter
+
+For `list --month 2026-10 --category " FOOD "`:
+
+1. `argparse` stores the month and category strings.
+2. `main()` calls `store.list(args.month, args.category)`.
+3. `valid_month()` returns `"2026-10"` after checking its shape and calendar.
+4. `normalize_category()` trims and lowercases `" FOOD "` to `"food"`.
+5. `list()` joins the two fixed conditions with `AND`.
+6. SQLite receives the fixed query and the separate parameter list
+   `["2026-10", "food"]`.
+7. Only October rows whose stored category is exactly `food` are returned, still
+   ordered by newest date and ID first.
+
+An empty category is invalid rather than meaning “all categories.” Omitting the
+flag produces `None`, which means no category condition. This makes accidental
+empty input visible and keeps the meaning of omission distinct from invalid data.
+
+### Design decision
+
+The feature uses exact normalized matching, not substring or fuzzy search. Stored
+categories already use `normalize_category()`, so applying the same function to a
+filter makes `Food`, ` food `, and `FOOD` equivalent without adding a second set of
+rules. Reusing `list()` from `summary()` and `export()` also prevents three query
+implementations from drifting apart.
+
+## 6. What changed in Version 1.4.2
 
 Version 1.4.2 closes a CSV syntax gap in the atomic importer. Python's CSV reader
 is permissive by default. For example, a final field that starts with `"` but
@@ -155,7 +246,7 @@ Strict syntax checking complements the existing semantic checks: the CSV reader
 checks structure, while functions such as `money_to_kobo()` and `valid_date()`
 check what each field means.
 
-## 6. What changed in Version 1.4.1
+## 7. What changed in Version 1.4.1
 
 Version 1.4.1 is a small deletion-safety patch. `get()` and `update()` already
 required a positive integer ID, but `delete()` previously sent its argument
@@ -222,7 +313,7 @@ For `python -m expense_tracker --db practice.db delete -1 --yes`:
 This patch deliberately adds no new command. It strengthens an existing contract,
 which is valuable maintenance work even though the production change is one line.
 
-## 7. What changed in Version 1.4
+## 8. What changed in Version 1.4
 
 Version 1.4 adds an atomic CSV import path. “Atomic” means one import is treated as
 a unit: all valid rows are stored, or an error leaves the database unchanged. The
@@ -302,7 +393,7 @@ Exact headers make accidental column swaps visible instead of guessing. Holding
 the prepared rows in memory keeps the beginner implementation clear, but it also
 means this version is intended for small personal files rather than huge imports.
 
-## 8. What changed in Version 1.3
+## 9. What changed in Version 1.3
 
 Version 1.3 adds a partial-update path. A user chooses one or more of `--amount`,
 `--category`, `--date`, and `--note`; every omitted field keeps its existing value.
@@ -379,7 +470,7 @@ If any supplied value is invalid, validation raises before the update statement.
 If no flags are supplied, the empty `changes` dictionary is rejected. Tests verify
 that the original row remains unchanged after each rejected attempt.
 
-## 9. What changed in Version 1.2
+## 10. What changed in Version 1.2
 
 Version 1.2 turns two documented input limits into executable contracts. No
 runtime function changed: `ExpenseStore.add()` already enforced the limits. The
@@ -425,7 +516,7 @@ For `maximum_category = "A" * 50`:
 For `"b" * 51`, the length check is true. `add()` raises `ValueError` before the
 `INSERT`, and the final row-count assertion proves that no partial record appeared.
 
-## 10. What changed in Version 1.1
+## 11. What changed in Version 1.1
 
 ### `ExpenseStore.get(expense_id)`
 
@@ -470,7 +561,7 @@ Two tests were added:
 The suite had 12 tests at Version 1.1, 14 after Version 1.2, and 17 after
 Version 1.3.
 
-## 11. Execution trace: `show 1`
+## 12. Execution trace: `show 1`
 
 Assume expense 1 already exists.
 
@@ -494,7 +585,7 @@ Observed output from the tested practice run:
 For `show 999`, the observed message was `Expense ID not found.` and the process
 returned status 2. That nonzero status lets scripts distinguish success from error.
 
-## 12. Trace an added expense
+## 13. Trace an added expense
 
 For `python -m expense_tracker --db practice.db add 4500 groceries`:
 
@@ -510,7 +601,7 @@ For `python -m expense_tracker --db practice.db add 4500 groceries`:
 Predict each value before running the command. That is more useful than memorizing
 the final code.
 
-## 13. Core Python functions and decisions
+## 14. Core Python functions and decisions
 
 ### `money_to_kobo(value)`
 
@@ -536,7 +627,7 @@ formula. The function prefixes an apostrophe when a user-controlled category or
 note begins with such a character after whitespace. This is a conservative export
 defense; spreadsheet behavior still varies.
 
-## 14. Classes, state, and SQLite
+## 15. Classes, state, and SQLite
 
 `ExpenseStore` is a class. Each instance stores its database path in `self.path`.
 `self` means the particular object on which a method was called.
@@ -558,7 +649,7 @@ context handles transactions, and the helper closes each connection.
 All SQL values use `?` placeholders. Never replace them with string interpolation.
 A note that looks like SQL remains data rather than becoming a command.
 
-## 15. Tests and verified behavior
+## 16. Tests and verified behavior
 
 Run:
 
@@ -566,18 +657,19 @@ Run:
 python -m unittest discover -s tests -v
 ```
 
-The 2026-10-17 milestone run reported:
+The 2026-10-18 milestone run reported:
 
 ```text
-Ran 23 tests
+Ran 25 tests
 OK
 ```
 
 Tests use a fresh temporary folder and database for each test. They cover exact
 money conversion, rejected money and dates, exact 50/51-character category and
-500/501-character note boundaries, persistence after reopening, sorting, monthly
-filtering and totals, single-record lookup, valid partial updates, rejected updates,
-missing update IDs, note clearing, SQL-looking text, CSV escaping, deletion,
+500/501-character note boundaries, persistence after reopening, sorting, normalized
+category filtering, combined month/category filtering, filtered totals and CSV,
+single-record lookup, valid partial updates, rejected updates, missing update IDs,
+note clearing, SQL-looking text, CSV escaping, deletion,
 confirmation, rejected deletion IDs with row preservation, export-to-import
 behavior, fresh imported IDs, atomic rejection of an invalid later value,
 malformed CSV shapes and quote syntax, and real CLI paths.
@@ -585,12 +677,14 @@ malformed CSV shapes and quote syntax, and real CLI paths.
 A passing suite proves only the listed cases passed in that environment. It does
 not prove the absence of every bug, production performance, or security readiness.
 
-## 16. Current limitations
+## 17. Current limitations
 
 - Single local user; no accounts, authentication, or per-user authorization.
 - NGN only; the schema cannot safely mix currencies.
 - No duplicate detection, undo, or audit history. Importing the same file twice
   creates two sets of expenses.
+- Category filtering is an exact normalized match. There is no partial, fuzzy, or
+  multi-category search.
 - CSV import requires one of two exact header orders, generates fresh IDs, and
   holds every prepared row in memory before inserting.
 - Formula-like text protected by export begins with an apostrophe. Import treats
@@ -606,7 +700,27 @@ not prove the absence of every bug, production performance, or security readines
 
 These are scope boundaries, not hidden completed features.
 
-## 17. Interview questions and honest answers
+## 18. Interview questions and honest answers
+
+**Why build the optional filters as condition and parameter lists?**
+The method can support no filter, either individual filter, or both without four
+duplicated SQL statements. The structure also keeps SQL text separate from values.
+
+**Why is the dynamic query still parameterized?**
+Only hard-coded fragments such as `category=?` are joined into the query. Month and
+category values stay in the parameter list, so user input cannot become SQL syntax.
+
+**Why normalize the category filter?**
+Categories are normalized before storage. Reusing the same function gives filters
+the same validation and makes differences in case or surrounding spaces irrelevant.
+
+**Why do `summary()` and `export()` call `list()`?**
+There is one selection rule to test and maintain. A filter fix in `list()` then
+applies to displaying, totaling, and exporting records consistently.
+
+**Why does an empty category fail instead of selecting every category?**
+Omitting `--category` already means no category filter. Treating an empty supplied
+value as invalid catches mistakes instead of silently broadening the result.
 
 **Why enable strict CSV parsing?**
 Permissive parsing can turn broken quote syntax into unexpected text. Strict mode
@@ -709,7 +823,7 @@ and API integration tests. Those features are not implemented here.
 Development used AI assistance. A truthful answer should distinguish generated or
 assisted implementation from the code personally studied, changed, and tested.
 
-## 18. Hands-on exercises
+## 19. Hands-on exercises
 
 Do these locally; reading alone is not practical mastery.
 
@@ -761,10 +875,17 @@ a quote but never closes. Predict the error line, run `import`, and prove `list`
 contains no imported rows. Add the closing quote, import again, and explain why
 both rows now commit together.
 
-## 19. Readiness check
+### Exercise I — Trace combined filters
 
-You understand Version 1.4.2 when you can run every command unaided, distinguish
-CSV syntax validation from field validation, explain `strict=True`, trace an
-unclosed quote to a line-specific error, prove the valid earlier CSV row was not
-inserted, repair the file, make a small local change, observe the malformed-CSV
-test fail, restore the behavior, and return all 23 tests to green.
+Add `food` and `data` expenses in two different months. Before running anything,
+predict the rows and total for `summary --month 2026-10 --category food`. Run the
+command, export the same filtered selection, inspect the CSV, then explain which
+parts of the query are fixed SQL and which values are parameters.
+
+## 20. Readiness check
+
+You understand Version 1.5 when you can run every command unaided, predict results
+for no filter, either filter, and both filters, explain normalization and `None`,
+identify the hard-coded SQL fragments and bound parameters, prove that list,
+summary, and export select the same rows, make a small local change, observe a
+category-filter test fail, restore the behavior, and return all 25 tests to green.
