@@ -5,7 +5,7 @@ import unittest
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 from expense_tracker.core import ExpenseStore, money_to_kobo
-from expense_tracker.__main__ import main
+from expense_tracker.__main__ import format_expense_count, main
 
 
 class TrackerTests(unittest.TestCase):
@@ -18,6 +18,11 @@ class TrackerTests(unittest.TestCase):
     def test_exact_money(self):
         self.assertEqual(money_to_kobo("0.29"), 29)
         self.assertEqual(money_to_kobo("1000.50"), 100050)
+
+    def test_format_expense_count(self):
+        self.assertEqual(format_expense_count(0), "0 expenses")
+        self.assertEqual(format_expense_count(1), "1 expense")
+        self.assertEqual(format_expense_count(2), "2 expenses")
 
     def test_invalid_money(self):
         for value in ("0", "-1", "nan", "Infinity", "abc", "1.001", "1e100"):
@@ -255,7 +260,7 @@ class TrackerTests(unittest.TestCase):
                 "--db", str(self.db), "export", str(path),
                 "--month", "2026-10", "--category", "food",
             ])
-        self.assertEqual(output.getvalue().strip(), "Exported 1 expenses.")
+        self.assertEqual(output.getvalue().strip(), "Exported 1 expense.")
         with path.open(newline="", encoding="utf-8") as handle:
             exported = list(csv.DictReader(handle))
         self.assertEqual([row["note"] for row in exported], ["Lunch"])
@@ -301,7 +306,7 @@ class TrackerTests(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             main(["--db", str(self.db), "import", str(path)])
-        self.assertEqual(output.getvalue().strip(), "Imported 1 expenses.")
+        self.assertEqual(output.getvalue().strip(), "Imported 1 expense.")
         row = self.store.list()[0]
         self.assertEqual(row["amount_kobo"], 150025)
         self.assertEqual(row["category"], "food")

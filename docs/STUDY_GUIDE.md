@@ -1,4 +1,4 @@
-# Python Expense Tracker — Version 1.5 Study Guide
+# Python Expense Tracker — Version 1.5.1 Study Guide
 
 ## 1. What this project does
 
@@ -55,8 +55,8 @@ implemented.
 | `update ID [OPTIONS]` | Change only selected fields | Prints the updated row |
 | `list` | Retrieve expenses matching optional filters | Newest date and ID first |
 | `summary` | Add matching amounts by category | Prints category totals and grand total |
-| `export PATH` | Write filtered rows to CSV | Overwrites the destination file |
-| `import PATH` | Strictly parse, validate, and insert CSV | Writes all rows or none |
+| `export PATH` | Write filtered rows to CSV | Overwrites the file and reports a grammatical count |
+| `import PATH` | Strictly parse, validate, and insert CSV | Writes all or none and reports a grammatical count |
 | `delete ID --yes` | Permanently remove a row | Requires a positive ID and confirmation |
 
 `--month YYYY-MM` and `--category CATEGORY` work independently or together with
@@ -88,7 +88,77 @@ terminal text -> argparse -> main() -> ExpenseStore -> SQLite file
 This separation is enough for a small project. A larger service would normally
 split request models, business services, repositories, migrations, and logging.
 
-## 5. What changed in Version 1.5
+## 5. What changed in Version 1.5.1
+
+Version 1.5.1 fixes a small but visible command-line grammar bug. The `export` and
+`import` commands previously always added the word `expenses`, which produced
+messages such as `Exported 1 expenses.` A portfolio project should handle the
+edge cases users can see, even when the database behavior is already correct.
+
+The commands now produce:
+
+```text
+Exported 0 expenses.
+Exported 1 expense.
+Exported 2 expenses.
+Imported 1 expense.
+```
+
+### New pure formatting function
+
+`expense_tracker/__main__.py` now defines:
+
+```python
+def format_expense_count(count):
+    """Return a count with the grammatically correct expense label."""
+    label = "expense" if count == 1 else "expenses"
+    return f"{count} {label}"
+```
+
+This is a **function**: a named, reusable block of code. `count` is its parameter,
+and `return` sends the completed string back to the caller. The function does not
+print, read a file, or change the database, so it is also a **pure function** for
+the integer inputs used by the CLI. The same input always produces the same output.
+
+The expression `"expense" if count == 1 else "expenses"` is a **conditional
+expression**. It chooses the singular word only when the count is exactly one.
+Zero uses the plural in standard English, as do two and larger counts.
+
+### Changed command paths
+
+`export` and `import` now save the storage method's returned count in a variable,
+pass it to the helper, and print the result:
+
+```python
+count = store.export(args.path, args.month, args.category)
+print(f"Exported {format_expense_count(count)}.")
+```
+
+The import branch follows the same shape. Keeping the grammar in one helper means
+the commands cannot drift into different singular/plural rules.
+
+### Execution trace: exporting one expense
+
+1. `argparse` selects the `export` branch and supplies the requested path and
+   optional filters.
+2. `ExpenseStore.export()` writes the matching rows and returns integer `1`.
+3. `main()` assigns that value to `count`.
+4. `format_expense_count(1)` evaluates `count == 1` as `True`.
+5. The helper sets `label` to `"expense"` and returns `"1 expense"`.
+6. The command prints `Exported 1 expense.`
+
+For an empty selection, the storage method returns `0`. The condition is false,
+so the helper returns `"0 expenses"`. For two rows it returns `"2 expenses"`.
+
+### Design decision
+
+The helper belongs in `__main__.py`, not `core.py`, because it controls human-facing
+grammar rather than money, validation, or persistence. `ExpenseStore.export()` and
+`import_csv()` continue returning integers that a terminal, future API, or test can
+present differently. The formatter is intentionally small and tested directly at
+the important `0`, `1`, and `2` boundary values.
+
+## 6. What changed in Version 1.5
 
 Version 1.5 adds one consistent category filter to three existing commands. A user
 can now select one normalized category with `list`, calculate only that category
@@ -176,7 +246,7 @@ filter makes `Food`, ` food `, and `FOOD` equivalent without adding a second set
 rules. Reusing `list()` from `summary()` and `export()` also prevents three query
 implementations from drifting apart.
 
-## 6. What changed in Version 1.4.2
+## 7. What changed in Version 1.4.2
 
 Version 1.4.2 closes a CSV syntax gap in the atomic importer. Python's CSV reader
 is permissive by default. For example, a final field that starts with `"` but
@@ -246,7 +316,7 @@ Strict syntax checking complements the existing semantic checks: the CSV reader
 checks structure, while functions such as `money_to_kobo()` and `valid_date()`
 check what each field means.
 
-## 7. What changed in Version 1.4.1
+## 8. What changed in Version 1.4.1
 
 Version 1.4.1 is a small deletion-safety patch. `get()` and `update()` already
 required a positive integer ID, but `delete()` previously sent its argument
@@ -313,7 +383,7 @@ For `python -m expense_tracker --db practice.db delete -1 --yes`:
 This patch deliberately adds no new command. It strengthens an existing contract,
 which is valuable maintenance work even though the production change is one line.
 
-## 8. What changed in Version 1.4
+## 9. What changed in Version 1.4
 
 Version 1.4 adds an atomic CSV import path. “Atomic” means one import is treated as
 a unit: all valid rows are stored, or an error leaves the database unchanged. The
@@ -393,7 +463,7 @@ Exact headers make accidental column swaps visible instead of guessing. Holding
 the prepared rows in memory keeps the beginner implementation clear, but it also
 means this version is intended for small personal files rather than huge imports.
 
-## 9. What changed in Version 1.3
+## 10. What changed in Version 1.3
 
 Version 1.3 adds a partial-update path. A user chooses one or more of `--amount`,
 `--category`, `--date`, and `--note`; every omitted field keeps its existing value.
@@ -470,7 +540,7 @@ If any supplied value is invalid, validation raises before the update statement.
 If no flags are supplied, the empty `changes` dictionary is rejected. Tests verify
 that the original row remains unchanged after each rejected attempt.
 
-## 10. What changed in Version 1.2
+## 11. What changed in Version 1.2
 
 Version 1.2 turns two documented input limits into executable contracts. No
 runtime function changed: `ExpenseStore.add()` already enforced the limits. The
@@ -516,7 +586,7 @@ For `maximum_category = "A" * 50`:
 For `"b" * 51`, the length check is true. `add()` raises `ValueError` before the
 `INSERT`, and the final row-count assertion proves that no partial record appeared.
 
-## 11. What changed in Version 1.1
+## 12. What changed in Version 1.1
 
 ### `ExpenseStore.get(expense_id)`
 
@@ -561,7 +631,7 @@ Two tests were added:
 The suite had 12 tests at Version 1.1, 14 after Version 1.2, and 17 after
 Version 1.3.
 
-## 12. Execution trace: `show 1`
+## 13. Execution trace: `show 1`
 
 Assume expense 1 already exists.
 
@@ -585,7 +655,7 @@ Observed output from the tested practice run:
 For `show 999`, the observed message was `Expense ID not found.` and the process
 returned status 2. That nonzero status lets scripts distinguish success from error.
 
-## 13. Trace an added expense
+## 14. Trace an added expense
 
 For `python -m expense_tracker --db practice.db add 4500 groceries`:
 
@@ -601,7 +671,7 @@ For `python -m expense_tracker --db practice.db add 4500 groceries`:
 Predict each value before running the command. That is more useful than memorizing
 the final code.
 
-## 14. Core Python functions and decisions
+## 15. Core Python functions and decisions
 
 ### `money_to_kobo(value)`
 
@@ -627,7 +697,7 @@ formula. The function prefixes an apostrophe when a user-controlled category or
 note begins with such a character after whitespace. This is a conservative export
 defense; spreadsheet behavior still varies.
 
-## 15. Classes, state, and SQLite
+## 16. Classes, state, and SQLite
 
 `ExpenseStore` is a class. Each instance stores its database path in `self.path`.
 `self` means the particular object on which a method was called.
@@ -649,7 +719,7 @@ context handles transactions, and the helper closes each connection.
 All SQL values use `?` placeholders. Never replace them with string interpolation.
 A note that looks like SQL remains data rather than becoming a command.
 
-## 16. Tests and verified behavior
+## 17. Tests and verified behavior
 
 Run:
 
@@ -657,10 +727,10 @@ Run:
 python -m unittest discover -s tests -v
 ```
 
-The 2026-10-18 milestone run reported:
+The 2026-10-19 milestone run reported:
 
 ```text
-Ran 25 tests
+Ran 26 tests
 OK
 ```
 
@@ -668,6 +738,7 @@ Tests use a fresh temporary folder and database for each test. They cover exact
 money conversion, rejected money and dates, exact 50/51-character category and
 500/501-character note boundaries, persistence after reopening, sorting, normalized
 category filtering, combined month/category filtering, filtered totals and CSV,
+singular/plural formatting at counts 0, 1, and 2,
 single-record lookup, valid partial updates, rejected updates, missing update IDs,
 note clearing, SQL-looking text, CSV escaping, deletion,
 confirmation, rejected deletion IDs with row preservation, export-to-import
@@ -677,7 +748,7 @@ malformed CSV shapes and quote syntax, and real CLI paths.
 A passing suite proves only the listed cases passed in that environment. It does
 not prove the absence of every bug, production performance, or security readiness.
 
-## 17. Current limitations
+## 18. Current limitations
 
 - Single local user; no accounts, authentication, or per-user authorization.
 - NGN only; the schema cannot safely mix currencies.
@@ -700,7 +771,27 @@ not prove the absence of every bug, production performance, or security readines
 
 These are scope boundaries, not hidden completed features.
 
-## 18. Interview questions and honest answers
+## 19. Interview questions and honest answers
+
+**What is `format_expense_count()`?**
+It is a small pure formatting function. It receives an integer count, chooses a
+singular or plural label, and returns a string without printing or changing state.
+
+**What is the conditional expression doing?**
+`"expense" if count == 1 else "expenses"` selects one of two strings. Only the
+exact value `1` is singular; zero and all other counts use the plural.
+
+**Why return a string instead of printing inside the helper?**
+Returning keeps the function reusable and simple to test. The command-line layer
+decides whether and how to print the returned text.
+
+**Why keep this helper out of `ExpenseStore`?**
+The storage layer should return data, here an integer count. English grammar is a
+presentation concern and belongs in the command-line module.
+
+**Why test 0, 1, and 2?**
+They cover the value before the singular case, the singular case itself, and the
+first plural value after it. Together they catch the visible boundary bug.
 
 **Why build the optional filters as condition and parameter lists?**
 The method can support no filter, either individual filter, or both without four
@@ -823,7 +914,7 @@ and API integration tests. Those features are not implemented here.
 Development used AI assistance. A truthful answer should distinguish generated or
 assisted implementation from the code personally studied, changed, and tested.
 
-## 19. Hands-on exercises
+## 20. Hands-on exercises
 
 Do these locally; reading alone is not practical mastery.
 
@@ -882,10 +973,17 @@ predict the rows and total for `summary --month 2026-10 --category food`. Run th
 command, export the same filtered selection, inspect the CSV, then explain which
 parts of the query are fixed SQL and which values are parameters.
 
-## 20. Readiness check
+### Exercise J — Predict the returned string
 
-You understand Version 1.5 when you can run every command unaided, predict results
-for no filter, either filter, and both filters, explain normalization and `None`,
-identify the hard-coded SQL fragments and bound parameters, prove that list,
-summary, and export select the same rows, make a small local change, observe a
-category-filter test fail, restore the behavior, and return all 25 tests to green.
+Without running the code, write the return value of `format_expense_count()` for
+`0`, `1`, `2`, and `10`. Then call the function in a Python shell and compare your
+answers. Temporarily change `count == 1` to `count > 0`, run the focused formatter
+test, explain why it fails, restore the condition, and return the full suite to green.
+
+## 21. Readiness check
+
+You understand Version 1.5.1 when you can name the function, parameter, local
+variable, conditional expression, and return value; predict the outputs for 0, 1,
+and 2; explain why the helper belongs in the presentation layer; show correct
+single-row import and export messages; intentionally break the condition, observe
+the focused test fail, restore it, and return all 26 tests to green.

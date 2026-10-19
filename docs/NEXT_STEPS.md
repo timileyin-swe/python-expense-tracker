@@ -18,6 +18,8 @@
   physical line number before the atomic import reaches SQLite.
 - Version 1.5: filter `list`, `summary`, and `export` by an exact normalized
   category, independently or together with the existing month filter.
+- Version 1.5.1: format import and export counts as `1 expense` but `0 expenses`
+  and `2 expenses` through one tested CLI helper.
 
 ## Next small milestones
 

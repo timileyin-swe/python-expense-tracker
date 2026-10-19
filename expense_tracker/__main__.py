@@ -14,6 +14,12 @@ def format_expense(row):
     )
 
 
+def format_expense_count(count):
+    """Return a count with the grammatically correct expense label."""
+    label = "expense" if count == 1 else "expenses"
+    return f"{count} {label}"
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Track personal expenses in NGN.")
     parser.add_argument("--db", default=str(Path.home() / ".expense-tracker" / "expenses.db"))
@@ -76,11 +82,11 @@ def main(argv=None):
                 print(f"{category}: {format_money(kobo)}")
             print(f"TOTAL: {format_money(sum(totals.values()))}")
         elif args.command == "export":
-            print(
-                f"Exported {store.export(args.path, args.month, args.category)} expenses."
-            )
+            count = store.export(args.path, args.month, args.category)
+            print(f"Exported {format_expense_count(count)}.")
         elif args.command == "import":
-            print(f"Imported {store.import_csv(args.path)} expenses.")
+            count = store.import_csv(args.path)
+            print(f"Imported {format_expense_count(count)}.")
         elif args.command == "delete":
             if not args.yes:
                 parser.error("Deletion requires --yes. Back up your database first.")

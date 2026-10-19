@@ -16,8 +16,8 @@ python -m expense_tracker --db practice.db add 2000 data --date 2026-10-14 --not
 python -m expense_tracker --db practice.db update 1 --amount 5200.50 --category household --note ""
 python -m expense_tracker --db practice.db show 1
 python -m expense_tracker --db practice.db list --month 2026-10 --category household
-python -m expense_tracker --db practice.db summary --category household
-python -m expense_tracker --db practice.db export expenses.csv --month 2026-10 --category household
+python -m expense_tracker --db practice.db summary --month 2026-10
+python -m expense_tracker --db practice.db export expenses.csv --month 2026-10
 python -m expense_tracker --db restored.db import expenses.csv
 ```
 
@@ -60,6 +60,8 @@ All amounts use NGN; currencies cannot be mixed.
   anything. Strict parsing rejects malformed quotes, errors identify the physical
   CSV line, and imported source IDs are ignored.
 - `format_expense()` gives `list`, `show`, and `update` one shared output format.
+- `format_expense_count()` gives `import` and `export` correct singular or plural
+  count messages without duplicating grammar logic.
 - CSV text fields are protected against common spreadsheet formula prefixes.
 - Deletion validates a positive integer ID before SQL and requires explicit
   confirmation: `python -m expense_tracker delete 1 --yes`.
@@ -70,11 +72,12 @@ All amounts use NGN; currencies cannot be mixed.
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains 25 tests. It uses temporary databases and covers
+The current suite contains 26 tests. It uses temporary databases and covers
 persistence, exact money, invalid input, category and note length boundaries,
 month/category filters and totals, single-record lookup, partial updates, rejected
-updates, filtered CSV export, atomic CSV import, malformed headers, fields and quoted syntax,
-SQL-looking notes, deletion confirmation, rejected deletion IDs, and CLI commands.
+updates, filtered CSV export, atomic CSV import, malformed headers, fields and
+quoted syntax, singular/plural count messages, SQL-looking notes, deletion
+confirmation, rejected deletion IDs, and CLI commands.
 
 ## Learn the project
 

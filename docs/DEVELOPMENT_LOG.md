@@ -1,5 +1,45 @@
 # Development log
 
+## 2026-10-19 — Correct singular and plural count messages
+
+### Completed
+
+- Added the pure `format_expense_count(count)` CLI helper so an exact count of one
+  uses `expense`, while zero and every other count use `expenses`.
+- Replaced duplicated import and export count wording with the shared helper.
+- Kept persistence methods unchanged: they still return integers, while the
+  command-line presentation layer owns English grammar.
+- Corrected the README practice workflow so its unfiltered summary matches the
+  documented NGN 7,200.50 example.
+- Updated the README, study guide, and development plan to Version 1.5.1 with
+  beginner-readable coverage of functions, parameters, local variables,
+  conditional expressions, return values, and pure functions.
+
+### Tested
+
+- `python -m compileall -q expense_tracker tests`: completed successfully.
+- Three focused formatter and CLI tests passed.
+- `python -m unittest discover -s tests -v`: 26 tests passed.
+- Direct boundary checks proved `0 expenses`, `1 expense`, and `2 expenses`.
+- Rehearsed the actual CLI: empty export reported `Exported 0 expenses.`, one-row
+  export reported `Exported 1 expense.`, two-row export reported
+  `Exported 2 expenses.`, and one-row import reported `Imported 1 expense.`
+
+### Pending
+
+- Hands-on learner completion of the Version 1.5.1 formatter exercise.
+- Continue the separate job-application API after functions, modules, and
+  exceptions have been demonstrated through practical Python work.
+- Later progression to PostgreSQL, queues, Docker, monitoring, an AI document
+  assistant, and optional cloud deployment.
+
+### Blocked
+
+- Publishing the prepared job-application API remains blocked: the intended
+  repository still does not exist and repository creation is unavailable through
+  the connected GitHub actions. The starter bundle remains preserved separately;
+  no unrelated repository was modified.
+
 ## 2026-10-18 — Filter by normalized category
 
 ### Completed
