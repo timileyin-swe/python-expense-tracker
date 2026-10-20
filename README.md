@@ -1,9 +1,10 @@
 # Python Expense Tracker
 
 A local command-line application for recording NGN expenses, finding one expense
-by ID, filtering by month and category, viewing category totals, and importing or
-exporting CSV files. Built as a learning portfolio project using Python's standard
-library; no external packages are required.
+by ID, filtering by month and category, viewing category totals, creating
+consistent database backups, and importing or exporting CSV files. Built as a
+learning portfolio project using Python's standard library; no external packages
+are required.
 
 ## Quick start
 
@@ -14,6 +15,7 @@ folder. On Windows, replace `python` with `py` if necessary.
 python -m expense_tracker --db practice.db add 4500 groceries --date 2026-10-14 --note "Rice and vegetables"
 python -m expense_tracker --db practice.db add 2000 data --date 2026-10-14 --note "Weekly mobile data"
 python -m expense_tracker --db practice.db update 1 --amount 5200.50 --category household --note ""
+python -m expense_tracker --db practice.db backup practice-backup.db
 python -m expense_tracker --db practice.db show 1
 python -m expense_tracker --db practice.db list --month 2026-10 --category household
 python -m expense_tracker --db practice.db summary --month 2026-10
@@ -59,6 +61,9 @@ All amounts use NGN; currencies cannot be mixed.
 - `ExpenseStore.import_csv()` validates every row before one transaction inserts
   anything. Strict parsing rejects malformed quotes, errors identify the physical
   CSV line, and imported source IDs are ignored.
+- `ExpenseStore.backup()` uses SQLite's backup API to create or refresh a
+  consistent snapshot, creates missing destination folders, and rejects the live
+  database itself as the destination.
 - `format_expense()` gives `list`, `show`, and `update` one shared output format.
 - `format_expense_count()` gives `import` and `export` correct singular or plural
   count messages without duplicating grammar logic.
@@ -72,12 +77,13 @@ All amounts use NGN; currencies cannot be mixed.
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains 26 tests. It uses temporary databases and covers
+The current suite contains 28 tests. It uses temporary databases and covers
 persistence, exact money, invalid input, category and note length boundaries,
 month/category filters and totals, single-record lookup, partial updates, rejected
 updates, filtered CSV export, atomic CSV import, malformed headers, fields and
 quoted syntax, singular/plural count messages, SQL-looking notes, deletion
-confirmation, rejected deletion IDs, and CLI commands.
+confirmation, rejected deletion IDs, independent and refreshed database backups,
+same-path backup rejection, and CLI commands.
 
 ## Learn the project
 
@@ -92,9 +98,11 @@ This is a single-user local CLI, with no web interface, authentication, encrypti
 or cloud deployment. Category filtering is an exact normalized match, not partial
 or fuzzy search. CSV export overwrites the specified output file. CSV import
 accepts only its documented headers, generates new IDs, and does not detect
-duplicates. Back up the SQLite file while the application is closed. Deletion has
-no undo. Do not commit personal spending records; database and CSV files are
-ignored by Git.
+duplicates. The backup command creates a full local database snapshot; it is not
+automatic, encrypted, uploaded, or a per-record undo feature. Reusing a destination
+refreshes that backup. Deletion has no built-in undo, so create and verify a backup
+first. Do not commit personal spending records; database and CSV files are ignored
+by Git.
 
 Development uses AI assistance. Learning and hands-on exercises are documented
 separately from implementation; this repository makes no claims about production

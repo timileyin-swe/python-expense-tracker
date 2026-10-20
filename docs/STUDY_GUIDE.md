@@ -1,4 +1,4 @@
-# Python Expense Tracker — Version 1.5.1 Study Guide
+# Python Expense Tracker — Version 1.6 Study Guide
 
 ## 1. What this project does
 
@@ -10,6 +10,7 @@ SQLite database, and lets a user:
 - update selected fields on an existing expense;
 - list all expenses or filter them by month, category, or both;
 - summarize spending by category;
+- create or refresh a consistent database backup;
 - export selected records to CSV;
 - import validated CSV records atomically; and
 - permanently delete a confirmed record.
@@ -27,7 +28,9 @@ folder. Use a disposable database while learning:
 python -m expense_tracker --db practice.db add 4500 groceries --date 2026-10-14 --note "Rice and vegetables"
 python -m expense_tracker --db practice.db add 2000 data --date 2026-10-14 --note "Weekly mobile data"
 python -m expense_tracker --db practice.db update 1 --amount 5200.50 --category household --note ""
+python -m expense_tracker --db practice.db backup practice-backup.db
 python -m expense_tracker --db practice.db show 1
+python -m expense_tracker --db practice-backup.db show 1
 python -m expense_tracker --db practice.db list --month 2026-10 --category household
 python -m expense_tracker --db practice.db summary --month 2026-10
 python -m expense_tracker --db practice.db summary --month 2026-10 --category household
@@ -41,10 +44,11 @@ On Windows, `py` can replace `python`. You must be inside the repository folder 
 Python can find the `expense_tracker` package. The global `--db` option goes before
 the command; command-specific arguments go after the command.
 
-The expected monthly total is NGN 7,200.50 in both databases. The import creates
-new IDs; it does not copy IDs from `practice.csv`. Running the two `add` commands
-or the import again creates duplicate expenses because duplicate detection is not
-implemented.
+The expected monthly total is NGN 7,200.50 in both imported databases. The backup
+captures the complete state of `practice.db` at that moment, including the original
+IDs. The import creates new IDs; it does not copy IDs from `practice.csv`. Running
+the two `add` commands or the import again creates duplicate expenses because
+duplicate detection is not implemented.
 
 ## 3. Command behavior
 
@@ -55,6 +59,7 @@ implemented.
 | `update ID [OPTIONS]` | Change only selected fields | Prints the updated row |
 | `list` | Retrieve expenses matching optional filters | Newest date and ID first |
 | `summary` | Add matching amounts by category | Prints category totals and grand total |
+| `backup PATH` | Create or refresh a database snapshot | Rejects the live database as its destination |
 | `export PATH` | Write filtered rows to CSV | Overwrites the file and reports a grammatical count |
 | `import PATH` | Strictly parse, validate, and insert CSV | Writes all or none and reports a grammatical count |
 | `delete ID --yes` | Permanently remove a row | Requires a positive ID and confirmation |
@@ -69,7 +74,7 @@ and lowercasing used when an expense is added.
 | --- | --- |
 | `expense_tracker/__init__.py` | Marks the directory as a Python package |
 | `expense_tracker/__main__.py` | Parses commands, selects behavior, prints results |
-| `expense_tracker/core.py` | Validation, money conversion, persistence, summaries, CSV I/O |
+| `expense_tracker/core.py` | Validation, money conversion, persistence, backups, summaries, CSV I/O |
 | `tests/test_tracker.py` | Verifies behavior with isolated temporary databases |
 | `README.md` | Quick public overview and runnable examples |
 | `docs/STUDY_GUIDE.md` | Detailed learning reference and exercises |
@@ -88,7 +93,121 @@ terminal text -> argparse -> main() -> ExpenseStore -> SQLite file
 This separation is enough for a small project. A larger service would normally
 split request models, business services, repositories, migrations, and logging.
 
-## 5. What changed in Version 1.5.1
+## 5. What changed in Version 1.6
+
+Version 1.6 adds a safe, explicit database backup command:
+
+```sh
+python -m expense_tracker --db practice.db backup backups/practice.db
+```
+
+The command creates the destination folder when necessary, copies a consistent
+SQLite snapshot, and prints the destination. It can also refresh an existing
+backup. It refuses a destination that resolves to the live database itself.
+
+This feature is more reliable than copying a database file with ordinary file
+operations while it might be open. Python documents
+[`sqlite3.Connection.backup()`](https://docs.python.org/3/library/sqlite3.html#sqlite3.Connection.backup)
+as the database backup operation and notes that it works while other clients are
+accessing the database.
+
+### Changed storage method
+
+`ExpenseStore.backup(path)` belongs in `core.py` because it is persistence
+behavior that can be reused by the CLI, tests, or a future API:
+
+```python
+def backup(self, path):
+    """Create a consistent SQLite backup at a different path."""
+    destination = Path(path)
+    if destination.resolve() == self.path.resolve():
+        raise ValueError("Backup path must be different from the database path.")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    with self.connect() as source:
+        target = sqlite3.connect(destination)
+        try:
+            with target:
+                source.backup(target)
+        finally:
+            target.close()
+    return destination
+```
+
+`Path(path)` turns the input into a path object. `resolve()` produces an absolute,
+normalized path, so `expenses.db` and an equivalent spelling such as
+`folder/../expenses.db` compare as the same destination. This guard runs before
+the target connection is opened.
+
+`destination.parent.mkdir(parents=True, exist_ok=True)` creates every missing
+parent folder. `parents=True` permits more than one missing level, while
+`exist_ok=True` makes an existing folder acceptable.
+
+### Connections, transactions, and cleanup
+
+`self.connect()` opens the source connection through the class's existing context
+manager. That helper commits or rolls back its transaction and closes the source
+in a `finally` block.
+
+The target connection has two separate responsibilities:
+
+- `with target:` supplies transaction handling; and
+- the outer `try`/`finally` guarantees `target.close()` even if the backup raises.
+
+A transaction context and closing a resource are related but not identical.
+Python's SQLite connection context manager manages the transaction; this method
+closes the target explicitly. Closing both connections matters because operating
+systems and SQLite may otherwise keep file handles or locks longer than intended.
+
+The method returns the destination `Path` rather than printing. The CLI branch
+owns presentation:
+
+```python
+path = store.backup(args.path)
+print(f"Backed up database to {path}.")
+```
+
+### Execution trace: back up, then change the source
+
+For `python -m expense_tracker --db live.db backup backups/snapshot.db`:
+
+1. `argparse` stores `live.db` as the global database and selects `backup`.
+2. `ExpenseStore` opens or initializes `live.db`.
+3. `backup()` resolves the source and destination paths and proves they differ.
+4. The destination's parent folder is created if it is missing.
+5. The method opens source and target SQLite connections.
+6. `source.backup(target)` copies a consistent snapshot into the target database.
+7. The target is committed and closed; the source helper also closes its
+   connection.
+8. The method returns the `Path` and the CLI prints it.
+
+The verified command rehearsal then updated and deleted expense 1 from the live
+database. `list` reported no live expenses, while `show 1` against the backup still
+returned its original NGN 1,500.00 amount and note. The files are independent after
+the snapshot is created.
+
+### Refresh behavior and failure boundary
+
+If the destination already contains an older valid SQLite database, running
+`backup` again refreshes it to the source's current state. The regression test
+creates one snapshot, changes the source, proves the snapshot is unchanged, runs
+backup again, and then proves the refreshed destination contains both current
+rows.
+
+The same-path guard raises `ValueError` before opening a target. The CLI catches
+that error and exits through `parser.error()` with status 2. Other file and SQLite
+failures, such as an unwritable destination, follow the command's existing
+`OSError` and `sqlite3.Error` handling.
+
+### Design decision
+
+This is a whole-database snapshot, not record-level undo. It protects a user who
+creates and verifies a backup before a destructive operation, while keeping the
+implementation inside Python's standard library. There is intentionally no
+automatic schedule, encryption, cloud upload, retention policy, or restore
+command. A user can inspect a snapshot safely by selecting it with `--db`.
+
+## 6. What changed in Version 1.5.1
 
 Version 1.5.1 fixes a small but visible command-line grammar bug. The `export` and
 `import` commands previously always added the word `expenses`, which produced
@@ -158,7 +277,7 @@ grammar rather than money, validation, or persistence. `ExpenseStore.export()` a
 present differently. The formatter is intentionally small and tested directly at
 the important `0`, `1`, and `2` boundary values.
 
-## 6. What changed in Version 1.5
+## 7. What changed in Version 1.5
 
 Version 1.5 adds one consistent category filter to three existing commands. A user
 can now select one normalized category with `list`, calculate only that category
@@ -246,7 +365,7 @@ filter makes `Food`, ` food `, and `FOOD` equivalent without adding a second set
 rules. Reusing `list()` from `summary()` and `export()` also prevents three query
 implementations from drifting apart.
 
-## 7. What changed in Version 1.4.2
+## 8. What changed in Version 1.4.2
 
 Version 1.4.2 closes a CSV syntax gap in the atomic importer. Python's CSV reader
 is permissive by default. For example, a final field that starts with `"` but
@@ -316,7 +435,7 @@ Strict syntax checking complements the existing semantic checks: the CSV reader
 checks structure, while functions such as `money_to_kobo()` and `valid_date()`
 check what each field means.
 
-## 8. What changed in Version 1.4.1
+## 9. What changed in Version 1.4.1
 
 Version 1.4.1 is a small deletion-safety patch. `get()` and `update()` already
 required a positive integer ID, but `delete()` previously sent its argument
@@ -383,7 +502,7 @@ For `python -m expense_tracker --db practice.db delete -1 --yes`:
 This patch deliberately adds no new command. It strengthens an existing contract,
 which is valuable maintenance work even though the production change is one line.
 
-## 9. What changed in Version 1.4
+## 10. What changed in Version 1.4
 
 Version 1.4 adds an atomic CSV import path. “Atomic” means one import is treated as
 a unit: all valid rows are stored, or an error leaves the database unchanged. The
@@ -463,7 +582,7 @@ Exact headers make accidental column swaps visible instead of guessing. Holding
 the prepared rows in memory keeps the beginner implementation clear, but it also
 means this version is intended for small personal files rather than huge imports.
 
-## 10. What changed in Version 1.3
+## 11. What changed in Version 1.3
 
 Version 1.3 adds a partial-update path. A user chooses one or more of `--amount`,
 `--category`, `--date`, and `--note`; every omitted field keeps its existing value.
@@ -540,7 +659,7 @@ If any supplied value is invalid, validation raises before the update statement.
 If no flags are supplied, the empty `changes` dictionary is rejected. Tests verify
 that the original row remains unchanged after each rejected attempt.
 
-## 11. What changed in Version 1.2
+## 12. What changed in Version 1.2
 
 Version 1.2 turns two documented input limits into executable contracts. No
 runtime function changed: `ExpenseStore.add()` already enforced the limits. The
@@ -586,7 +705,7 @@ For `maximum_category = "A" * 50`:
 For `"b" * 51`, the length check is true. `add()` raises `ValueError` before the
 `INSERT`, and the final row-count assertion proves that no partial record appeared.
 
-## 12. What changed in Version 1.1
+## 13. What changed in Version 1.1
 
 ### `ExpenseStore.get(expense_id)`
 
@@ -631,7 +750,7 @@ Two tests were added:
 The suite had 12 tests at Version 1.1, 14 after Version 1.2, and 17 after
 Version 1.3.
 
-## 13. Execution trace: `show 1`
+## 14. Execution trace: `show 1`
 
 Assume expense 1 already exists.
 
@@ -655,7 +774,7 @@ Observed output from the tested practice run:
 For `show 999`, the observed message was `Expense ID not found.` and the process
 returned status 2. That nonzero status lets scripts distinguish success from error.
 
-## 14. Trace an added expense
+## 15. Trace an added expense
 
 For `python -m expense_tracker --db practice.db add 4500 groceries`:
 
@@ -671,7 +790,7 @@ For `python -m expense_tracker --db practice.db add 4500 groceries`:
 Predict each value before running the command. That is more useful than memorizing
 the final code.
 
-## 15. Core Python functions and decisions
+## 16. Core Python functions and decisions
 
 ### `money_to_kobo(value)`
 
@@ -697,7 +816,7 @@ formula. The function prefixes an apostrophe when a user-controlled category or
 note begins with such a character after whitespace. This is a conservative export
 defense; spreadsheet behavior still varies.
 
-## 16. Classes, state, and SQLite
+## 17. Classes, state, and SQLite
 
 `ExpenseStore` is a class. Each instance stores its database path in `self.path`.
 `self` means the particular object on which a method was called.
@@ -719,7 +838,7 @@ context handles transactions, and the helper closes each connection.
 All SQL values use `?` placeholders. Never replace them with string interpolation.
 A note that looks like SQL remains data rather than becoming a command.
 
-## 17. Tests and verified behavior
+## 18. Tests and verified behavior
 
 Run:
 
@@ -727,10 +846,10 @@ Run:
 python -m unittest discover -s tests -v
 ```
 
-The 2026-10-19 milestone run reported:
+The 2026-10-20 milestone run reported:
 
 ```text
-Ran 26 tests
+Ran 28 tests
 OK
 ```
 
@@ -743,12 +862,13 @@ single-record lookup, valid partial updates, rejected updates, missing update ID
 note clearing, SQL-looking text, CSV escaping, deletion,
 confirmation, rejected deletion IDs with row preservation, export-to-import
 behavior, fresh imported IDs, atomic rejection of an invalid later value,
-malformed CSV shapes and quote syntax, and real CLI paths.
+malformed CSV shapes and quote syntax, snapshot independence, refresh of an
+existing backup, same-path backup rejection, and real CLI paths.
 
 A passing suite proves only the listed cases passed in that environment. It does
 not prove the absence of every bug, production performance, or security readiness.
 
-## 18. Current limitations
+## 19. Current limitations
 
 - Single local user; no accounts, authentication, or per-user authorization.
 - NGN only; the schema cannot safely mix currencies.
@@ -764,6 +884,10 @@ not prove the absence of every bug, production performance, or security readines
 - Text limits use Python's `len()` after trimming. There is no Unicode
   normalization or separate UTF-8 byte limit.
 - No encryption; anyone who can read the database file can read its contents.
+- Backups are manual, local, whole-database snapshots. There is no automatic
+  schedule, rotation, encryption, remote upload, restore command, or record-level
+  undo. Refreshing a named destination replaces its previous snapshot state.
+- A backup needs enough writable local storage for another database copy.
 - CSV export overwrites the target path.
 - A valid confirmed deletion is immediate and has no undo or audit record.
 - No API, browser interface, PostgreSQL, Docker, monitoring, or cloud deployment.
@@ -771,7 +895,37 @@ not prove the absence of every bug, production performance, or security readines
 
 These are scope boundaries, not hidden completed features.
 
-## 19. Interview questions and honest answers
+## 20. Interview questions and honest answers
+
+**Why use `Connection.backup()` instead of an ordinary file copy?**
+It asks SQLite to produce a consistent database snapshot through database
+connections, including while the source may be accessed. An ordinary byte copy
+does not express that database-level guarantee.
+
+**Why compare resolved paths before opening the target?**
+Different text can identify the same file. Resolving catches equivalent spellings
+and stops the method from trying to use the live database as its own destination.
+
+**Why create the destination's parent folder inside the method?**
+The storage operation owns its complete path requirement. Callers can request a
+nested destination without separately coordinating directory creation.
+
+**What is the difference between the transaction context and `close()`?**
+`with target:` commits successful work or rolls back on failure. `close()` releases
+the connection resource. The method uses `finally` so closure happens on both
+success and error paths.
+
+**Why return a `Path` rather than print inside `backup()`?**
+Returning keeps the storage layer independent from terminal presentation. The CLI
+can print it, a test can compare it, and a future API can serialize it differently.
+
+**Is the backup a live mirror?**
+No. It is a snapshot of the source at one operation. Later source changes leave
+that snapshot unchanged until the backup command is run again.
+
+**Does this provide undo for one deleted expense?**
+No. The snapshot contains the full database. This version has no merge or
+record-level restore command; the backup can be inspected by passing it to `--db`.
 
 **What is `format_expense_count()`?**
 It is a small pure formatting function. It receives an integer count, chooses a
@@ -914,7 +1068,7 @@ and API integration tests. Those features are not implemented here.
 Development used AI assistance. A truthful answer should distinguish generated or
 assisted implementation from the code personally studied, changed, and tested.
 
-## 20. Hands-on exercises
+## 21. Hands-on exercises
 
 Do these locally; reading alone is not practical mastery.
 
@@ -980,10 +1134,20 @@ Without running the code, write the return value of `format_expense_count()` for
 answers. Temporarily change `count == 1` to `count > 0`, run the focused formatter
 test, explain why it fails, restore the condition, and return the full suite to green.
 
-## 21. Readiness check
+### Exercise K — Prove snapshot independence
 
-You understand Version 1.5.1 when you can name the function, parameter, local
-variable, conditional expression, and return value; predict the outputs for 0, 1,
-and 2; explain why the helper belongs in the presentation layer; show correct
-single-row import and export messages; intentionally break the condition, observe
-the focused test fail, restore it, and return all 26 tests to green.
+Create `live.db` with one expense, then run `backup snapshot.db`. Update or delete
+the live row and predict what each database will show. Run `show 1` once with
+`--db live.db` and once with `--db snapshot.db`. Explain the difference between a
+snapshot and a live reference, then run backup again and confirm when the
+destination changes. Finally, attempt to back up `live.db` onto itself and explain
+why validation happens before the target connection opens.
+
+## 22. Readiness check
+
+You understand Version 1.6 when you can explain the difference between a database
+snapshot and a live reference; trace `ExpenseStore.backup()` from `Path` validation
+through both connection cleanups; justify the same-path guard and SQLite backup
+API; prove that later source changes leave an existing snapshot unchanged; refresh
+that snapshot intentionally; observe the same-path failure; and return all 28
+tests to green.

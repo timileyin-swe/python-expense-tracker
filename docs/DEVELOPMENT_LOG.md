@@ -1,5 +1,50 @@
 # Development log
 
+## 2026-10-20 — Add consistent database backups
+
+### Completed
+
+- Added `ExpenseStore.backup(path)`, which creates missing parent folders and
+  uses SQLite's connection backup API to create or refresh a consistent database
+  snapshot.
+- Rejected a destination that resolves to the live database path, including an
+  equivalent path containing `.`, before opening the destination connection.
+- Closed the destination connection in a `finally` block while continuing to use
+  the store's existing context manager for source connection cleanup.
+- Added `python -m expense_tracker --db SOURCE backup DESTINATION` and kept output
+  formatting in the command-line layer.
+- Updated the README, study guide, and development plan to Version 1.6 with
+  beginner-readable coverage of methods, `Path` objects, snapshots, validation,
+  transactions, and resource cleanup.
+
+### Tested
+
+- `python -m compileall -q expense_tracker tests`: completed successfully.
+- Two focused storage and CLI backup tests passed.
+- `python -m unittest discover -s tests -v`: 28 tests passed.
+- Proved that a new nested backup folder is created, a snapshot can be reopened,
+  later source updates do not change that snapshot, and rerunning backup refreshes
+  the destination with current source state.
+- Proved an equivalent source path is rejected and the CLI prints the destination.
+- Rehearsed add/backup/update/delete end to end: the live database became empty
+  while the backup still returned expense 1 with its original NGN 1,500.00 amount
+  and note.
+
+### Pending
+
+- Hands-on learner completion of the Version 1.6 backup exercise.
+- Continue the separate job-application API after functions, modules, exceptions,
+  and resource cleanup have been demonstrated through practical Python work.
+- Later progression to PostgreSQL, queues, Docker, monitoring, an AI document
+  assistant, and optional cloud deployment.
+
+### Blocked
+
+- Publishing the prepared job-application API remains blocked: the intended
+  repository still does not exist and repository creation is unavailable through
+  the connected GitHub actions. The starter bundle remains preserved separately;
+  no unrelated repository was modified.
+
 ## 2026-10-19 — Correct singular and plural count messages
 
 ### Completed

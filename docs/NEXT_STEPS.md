@@ -20,6 +20,9 @@
   category, independently or together with the existing month filter.
 - Version 1.5.1: format import and export counts as `1 expense` but `0 expenses`
   and `2 expenses` through one tested CLI helper.
+- Version 1.6: create or refresh a consistent SQLite backup at a separate path,
+  including parent-folder creation, same-path rejection, snapshot-independence
+  tests, and a documented `backup PATH` command.
 
 ## Next small milestones
 

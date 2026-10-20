@@ -173,6 +173,22 @@ class ExpenseStore:
             cursor = conn.execute("DELETE FROM expenses WHERE id=?", (expense_id,))
             return cursor.rowcount > 0
 
+    def backup(self, path):
+        """Create a consistent SQLite backup at a different path."""
+        destination = Path(path)
+        if destination.resolve() == self.path.resolve():
+            raise ValueError("Backup path must be different from the database path.")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        with self.connect() as source:
+            target = sqlite3.connect(destination)
+            try:
+                with target:
+                    source.backup(target)
+            finally:
+                target.close()
+        return destination
+
     def export(self, path, month=None, category=None):
         rows = self.list(month, category)
         with open(path, "w", encoding="utf-8", newline="") as handle:

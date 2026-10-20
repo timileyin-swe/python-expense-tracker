@@ -209,6 +209,48 @@ class TrackerTests(unittest.TestCase):
                 self.store.delete(invalid_id)
         self.assertIsNotNone(self.store.get(record_id))
 
+    def test_backup_creates_independent_snapshot_and_rejects_source_path(self):
+        record_id = self.store.add("10", "food", "2026-10-01", "Original")
+        backup_path = Path(self.temp.name) / "backups" / "snapshot.db"
+
+        self.assertEqual(self.store.backup(backup_path), backup_path)
+        snapshot = ExpenseStore(backup_path)
+        self.assertEqual(snapshot.get(record_id)["amount_kobo"], 1000)
+        self.assertEqual(snapshot.get(record_id)["note"], "Original")
+
+        self.store.update(record_id, amount="25", note="Changed")
+        self.store.add("5", "data", "2026-10-02")
+        self.assertEqual(snapshot.get(record_id)["amount_kobo"], 1000)
+        self.assertEqual(len(snapshot.list()), 1)
+
+        self.assertEqual(self.store.backup(backup_path), backup_path)
+        refreshed = ExpenseStore(backup_path)
+        self.assertEqual(refreshed.get(record_id)["amount_kobo"], 2500)
+        self.assertEqual(len(refreshed.list()), 2)
+
+        with self.assertRaisesRegex(ValueError, "different from the database path"):
+            self.store.backup(self.db.parent / "." / self.db.name)
+
+    def test_cli_backup_command(self):
+        record_id = self.store.add("1500", "food", "2026-10-12", "Lunch")
+        backup_path = Path(self.temp.name) / "snapshot.db"
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            main(["--db", str(self.db), "backup", str(backup_path)])
+        self.assertEqual(
+            output.getvalue().strip(), f"Backed up database to {backup_path}."
+        )
+
+        self.assertTrue(self.store.delete(record_id))
+        snapshot = ExpenseStore(backup_path)
+        self.assertEqual(snapshot.get(record_id)["note"], "Lunch")
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            main(["--db", str(backup_path), "show", str(record_id)])
+        self.assertIn("NGN 1,500.00 | food | Lunch", output.getvalue())
+
     def test_cli_requires_delete_confirmation(self):
         record_id = self.store.add("10", "food", "2026-10-01")
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exc:

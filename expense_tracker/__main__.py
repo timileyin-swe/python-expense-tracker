@@ -45,6 +45,8 @@ def main(argv=None):
             command.add_argument("path")
     import_command = commands.add_parser("import", help="Import expenses from CSV")
     import_command.add_argument("path")
+    backup = commands.add_parser("backup", help="Create a consistent database backup")
+    backup.add_argument("path")
     delete = commands.add_parser("delete")
     delete.add_argument("id", type=int)
     delete.add_argument("--yes", action="store_true", help="Confirm permanent deletion")
@@ -87,6 +89,9 @@ def main(argv=None):
         elif args.command == "import":
             count = store.import_csv(args.path)
             print(f"Imported {format_expense_count(count)}.")
+        elif args.command == "backup":
+            path = store.backup(args.path)
+            print(f"Backed up database to {path}.")
         elif args.command == "delete":
             if not args.yes:
                 parser.error("Deletion requires --yes. Back up your database first.")
