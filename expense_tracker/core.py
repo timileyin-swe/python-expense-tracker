@@ -1,8 +1,9 @@
 """Validation and SQLite persistence; money is stored as integer kobo."""
 import csv
-from contextlib import contextmanager
+import json
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -51,6 +52,17 @@ def csv_safe(value):
     if value.lstrip().startswith(("=", "+", "-", "@")):
         return "'" + value
     return value
+
+
+def expense_to_dict(row):
+    """Convert one expense row to a JSON-compatible public representation."""
+    return {
+        "id": row["id"],
+        "amount_ngn": f"{Decimal(row['amount_kobo']) / 100:.2f}",
+        "category": row["category"],
+        "date": row["spent_on"],
+        "note": row["note"],
+    }
 
 
 def valid_expense_id(value):
@@ -200,6 +212,14 @@ class ExpenseStore:
                     csv_safe(row["category"]), row["spent_on"], csv_safe(row["note"]),
                 ])
         return len(rows)
+
+    def export_json(self, path, month=None, category=None):
+        """Write selected expenses as one human-readable JSON array."""
+        records = [expense_to_dict(row) for row in self.list(month, category)]
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(records, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        return len(records)
 
     def import_csv(self, path):
         """Validate a CSV completely, then insert all rows in one transaction."""

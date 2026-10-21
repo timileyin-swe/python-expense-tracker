@@ -1,4 +1,4 @@
-# Python Expense Tracker — Version 1.6 Study Guide
+# Python Expense Tracker — Version 1.7 Study Guide
 
 ## 1. What this project does
 
@@ -11,7 +11,7 @@ SQLite database, and lets a user:
 - list all expenses or filter them by month, category, or both;
 - summarize spending by category;
 - create or refresh a consistent database backup;
-- export selected records to CSV;
+- export selected records to CSV or JSON;
 - import validated CSV records atomically; and
 - permanently delete a confirmed record.
 
@@ -35,6 +35,8 @@ python -m expense_tracker --db practice.db list --month 2026-10 --category house
 python -m expense_tracker --db practice.db summary --month 2026-10
 python -m expense_tracker --db practice.db summary --month 2026-10 --category household
 python -m expense_tracker --db practice.db export practice.csv --month 2026-10
+python -m expense_tracker --db practice.db export-json practice.json --month 2026-10
+python -m json.tool practice.json
 python -m expense_tracker --db restored.db import practice.csv
 python -m expense_tracker --db restored.db summary --month 2026-10
 python -m unittest discover -s tests -v
@@ -48,7 +50,8 @@ The expected monthly total is NGN 7,200.50 in both imported databases. The backu
 captures the complete state of `practice.db` at that moment, including the original
 IDs. The import creates new IDs; it does not copy IDs from `practice.csv`. Running
 the two `add` commands or the import again creates duplicate expenses because
-duplicate detection is not implemented.
+duplicate detection is not implemented. The JSON command is export-only and does
+not create another database.
 
 ## 3. Command behavior
 
@@ -61,12 +64,13 @@ duplicate detection is not implemented.
 | `summary` | Add matching amounts by category | Prints category totals and grand total |
 | `backup PATH` | Create or refresh a database snapshot | Rejects the live database as its destination |
 | `export PATH` | Write filtered rows to CSV | Overwrites the file and reports a grammatical count |
+| `export-json PATH` | Write filtered rows to readable JSON | Keeps exact money as decimal text |
 | `import PATH` | Strictly parse, validate, and insert CSV | Writes all or none and reports a grammatical count |
 | `delete ID --yes` | Permanently remove a row | Requires a positive ID and confirmation |
 
 `--month YYYY-MM` and `--category CATEGORY` work independently or together with
-`list`, `summary`, and `export`. Category matching is exact after the same trimming
-and lowercasing used when an expense is added.
+`list`, `summary`, `export`, and `export-json`. Category matching is exact after
+the same trimming and lowercasing used when an expense is added.
 
 ## 4. Project architecture
 
@@ -74,7 +78,7 @@ and lowercasing used when an expense is added.
 | --- | --- |
 | `expense_tracker/__init__.py` | Marks the directory as a Python package |
 | `expense_tracker/__main__.py` | Parses commands, selects behavior, prints results |
-| `expense_tracker/core.py` | Validation, money conversion, persistence, backups, summaries, CSV I/O |
+| `expense_tracker/core.py` | Validation, money conversion, persistence, backups, summaries, CSV/JSON I/O |
 | `tests/test_tracker.py` | Verifies behavior with isolated temporary databases |
 | `README.md` | Quick public overview and runnable examples |
 | `docs/STUDY_GUIDE.md` | Detailed learning reference and exercises |
@@ -93,7 +97,141 @@ terminal text -> argparse -> main() -> ExpenseStore -> SQLite file
 This separation is enough for a small project. A larger service would normally
 split request models, business services, repositories, migrations, and logging.
 
-## 5. What changed in Version 1.6
+## 5. What changed in Version 1.7
+
+Version 1.7 adds a JSON export that connects the current command-line project to a
+core web-API concept: converting internal data into a documented public shape.
+
+```sh
+python -m expense_tracker --db practice.db export-json october-food.json \
+  --month 2026-10 --category food
+```
+
+The output is one valid JSON array. A one-expense file has this shape:
+
+```json
+[
+  {
+    "id": 1,
+    "amount_ngn": "1500.25",
+    "category": "food",
+    "date": "2026-10-21",
+    "note": "Café lunch ₦"
+  }
+]
+```
+
+JSON has arrays, objects, strings, numbers, booleans, and `null`. The file uses a
+JSON array because an export may contain zero, one, or many expense objects.
+
+### New public row mapping
+
+`expense_to_dict(row)` converts the SQLite-specific row into ordinary Python data:
+
+```python
+def expense_to_dict(row):
+    """Convert one expense row to a JSON-compatible public representation."""
+    return {
+        "id": row["id"],
+        "amount_ngn": f"{Decimal(row['amount_kobo']) / 100:.2f}",
+        "category": row["category"],
+        "date": row["spent_on"],
+        "note": row["note"],
+    }
+```
+
+This function defines a small serialization boundary. Internal names such as
+`amount_kobo` and `spent_on` do not leak accidentally; the public record uses
+`amount_ngn` and `date`. Its return value contains only an integer and strings,
+which Python's standard JSON encoder supports directly.
+
+| Python value | JSON value | Reason |
+| --- | --- | --- |
+| integer `id` | number | IDs are whole numbers |
+| `amount_ngn` string | string | Preserves two exact decimal places |
+| category/date/note strings | strings | Already validated text values |
+| list of dictionaries | array of objects | Represents the selected collection |
+
+The amount deliberately remains a string. Converting `1500.25` through a binary
+`float` can introduce representation concerns, while the database already stores
+exact integer kobo. Formatting from kobo to `"1500.25"` keeps a predictable API
+contract. A future API client can decide how to display or convert that text.
+
+### New JSON export method
+
+`ExpenseStore.export_json()` reuses `list()` and writes one complete document:
+
+```python
+def export_json(self, path, month=None, category=None):
+    """Write selected expenses as one human-readable JSON array."""
+    records = [expense_to_dict(row) for row in self.list(month, category)]
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(records, handle, ensure_ascii=False, indent=2)
+        handle.write("\\n")
+    return len(records)
+```
+
+The list comprehension calls the mapping once for every selected row. Python's
+[`json.dump()` documentation](https://docs.python.org/3/library/json.html#json.dump)
+describes writing a Python object to a text stream. Here:
+
+- `ensure_ascii=False` keeps readable Unicode characters such as `é` and `₦`
+  instead of replacing them with escape sequences;
+- `indent=2` makes nested arrays and objects easy for a person to inspect;
+- the final newline works cleanly with terminal tools; and
+- the returned integer lets the CLI reuse `format_expense_count()`.
+
+The entire list is written with one `json.dump()` call. Repeated calls on the same
+file handle would place separate JSON values beside each other and create an
+invalid document.
+
+### CLI wiring and filter reuse
+
+`main()` adds `export-json` to the same parser-building loop as `list`,
+`summary`, and CSV `export`. Both export commands receive a path and the existing
+`--month` and `--category` options. The command branch is intentionally small:
+
+```python
+count = store.export_json(args.path, args.month, args.category)
+print(f"Exported {format_expense_count(count)} to JSON.")
+```
+
+There is no second SQL query implementation. `export_json()` calls `list()`, so
+month validation, category normalization, parameterized SQL, ordering, and
+combined-filter behavior remain in one tested place.
+
+### Execution trace: filtered JSON export
+
+For `export-json food.json --month 2026-10 --category " FOOD "`:
+
+1. `argparse` records the destination and both filter strings.
+2. `main()` calls `store.export_json(...)`.
+3. `list()` validates the month, normalizes the category to `food`, and executes
+   its parameterized query.
+4. The list comprehension passes each returned `sqlite3.Row` to
+   `expense_to_dict()`.
+5. Integer kobo becomes exact two-decimal text; the other fields are copied into
+   the documented public names.
+6. `json.dump()` writes one indented UTF-8 array and the method adds a newline.
+7. The method returns `1` and the CLI prints `Exported 1 expense to JSON.`
+
+The verified rehearsal exported one food expense while excluding a data expense.
+`python -m json.tool` accepted the document, and the tests parsed it again with
+`json.loads()` before checking every field.
+
+### Design decision and API bridge
+
+JSON export is useful on its own for integrations and portfolio inspection, but
+the reusable mapping is the more important Cloud-SWE lesson. A future FastAPI route
+could obtain rows from a service and reuse the same plain dictionary shape before
+the framework encodes an HTTP response. This project does not claim that an HTTP
+API, request validation, authentication, or PostgreSQL exists yet.
+
+This milestone intentionally adds export only. JSON import would need an explicit
+schema, type validation, duplicate rules, atomic writes, size limits, and useful
+item-level error locations rather than simply trusting `json.load()` output.
+
+## 6. What changed in Version 1.6
 
 Version 1.6 adds a safe, explicit database backup command:
 
@@ -207,7 +345,7 @@ implementation inside Python's standard library. There is intentionally no
 automatic schedule, encryption, cloud upload, retention policy, or restore
 command. A user can inspect a snapshot safely by selecting it with `--db`.
 
-## 6. What changed in Version 1.5.1
+## 7. What changed in Version 1.5.1
 
 Version 1.5.1 fixes a small but visible command-line grammar bug. The `export` and
 `import` commands previously always added the word `expenses`, which produced
@@ -220,6 +358,7 @@ The commands now produce:
 Exported 0 expenses.
 Exported 1 expense.
 Exported 2 expenses.
+Exported 1 expense to JSON.
 Imported 1 expense.
 ```
 
@@ -253,8 +392,8 @@ count = store.export(args.path, args.month, args.category)
 print(f"Exported {format_expense_count(count)}.")
 ```
 
-The import branch follows the same shape. Keeping the grammar in one helper means
-the commands cannot drift into different singular/plural rules.
+The import and JSON-export branches follow the same shape. Keeping the grammar in
+one helper means the commands cannot drift into different singular/plural rules.
 
 ### Execution trace: exporting one expense
 
@@ -272,12 +411,12 @@ so the helper returns `"0 expenses"`. For two rows it returns `"2 expenses"`.
 ### Design decision
 
 The helper belongs in `__main__.py`, not `core.py`, because it controls human-facing
-grammar rather than money, validation, or persistence. `ExpenseStore.export()` and
-`import_csv()` continue returning integers that a terminal, future API, or test can
-present differently. The formatter is intentionally small and tested directly at
-the important `0`, `1`, and `2` boundary values.
+grammar rather than money, validation, or persistence. `ExpenseStore.export()`,
+`export_json()`, and `import_csv()` return integers that a terminal, future API, or
+test can present differently. The formatter is intentionally small and tested
+directly at the important `0`, `1`, and `2` boundary values.
 
-## 7. What changed in Version 1.5
+## 8. What changed in Version 1.5
 
 Version 1.5 adds one consistent category filter to three existing commands. A user
 can now select one normalized category with `list`, calculate only that category
@@ -365,7 +504,7 @@ filter makes `Food`, ` food `, and `FOOD` equivalent without adding a second set
 rules. Reusing `list()` from `summary()` and `export()` also prevents three query
 implementations from drifting apart.
 
-## 8. What changed in Version 1.4.2
+## 9. What changed in Version 1.4.2
 
 Version 1.4.2 closes a CSV syntax gap in the atomic importer. Python's CSV reader
 is permissive by default. For example, a final field that starts with `"` but
@@ -435,7 +574,7 @@ Strict syntax checking complements the existing semantic checks: the CSV reader
 checks structure, while functions such as `money_to_kobo()` and `valid_date()`
 check what each field means.
 
-## 9. What changed in Version 1.4.1
+## 10. What changed in Version 1.4.1
 
 Version 1.4.1 is a small deletion-safety patch. `get()` and `update()` already
 required a positive integer ID, but `delete()` previously sent its argument
@@ -502,7 +641,7 @@ For `python -m expense_tracker --db practice.db delete -1 --yes`:
 This patch deliberately adds no new command. It strengthens an existing contract,
 which is valuable maintenance work even though the production change is one line.
 
-## 10. What changed in Version 1.4
+## 11. What changed in Version 1.4
 
 Version 1.4 adds an atomic CSV import path. “Atomic” means one import is treated as
 a unit: all valid rows are stored, or an error leaves the database unchanged. The
@@ -582,7 +721,7 @@ Exact headers make accidental column swaps visible instead of guessing. Holding
 the prepared rows in memory keeps the beginner implementation clear, but it also
 means this version is intended for small personal files rather than huge imports.
 
-## 11. What changed in Version 1.3
+## 12. What changed in Version 1.3
 
 Version 1.3 adds a partial-update path. A user chooses one or more of `--amount`,
 `--category`, `--date`, and `--note`; every omitted field keeps its existing value.
@@ -659,7 +798,7 @@ If any supplied value is invalid, validation raises before the update statement.
 If no flags are supplied, the empty `changes` dictionary is rejected. Tests verify
 that the original row remains unchanged after each rejected attempt.
 
-## 12. What changed in Version 1.2
+## 13. What changed in Version 1.2
 
 Version 1.2 turns two documented input limits into executable contracts. No
 runtime function changed: `ExpenseStore.add()` already enforced the limits. The
@@ -705,7 +844,7 @@ For `maximum_category = "A" * 50`:
 For `"b" * 51`, the length check is true. `add()` raises `ValueError` before the
 `INSERT`, and the final row-count assertion proves that no partial record appeared.
 
-## 13. What changed in Version 1.1
+## 14. What changed in Version 1.1
 
 ### `ExpenseStore.get(expense_id)`
 
@@ -750,7 +889,7 @@ Two tests were added:
 The suite had 12 tests at Version 1.1, 14 after Version 1.2, and 17 after
 Version 1.3.
 
-## 14. Execution trace: `show 1`
+## 15. Execution trace: `show 1`
 
 Assume expense 1 already exists.
 
@@ -774,7 +913,7 @@ Observed output from the tested practice run:
 For `show 999`, the observed message was `Expense ID not found.` and the process
 returned status 2. That nonzero status lets scripts distinguish success from error.
 
-## 15. Trace an added expense
+## 16. Trace an added expense
 
 For `python -m expense_tracker --db practice.db add 4500 groceries`:
 
@@ -790,7 +929,7 @@ For `python -m expense_tracker --db practice.db add 4500 groceries`:
 Predict each value before running the command. That is more useful than memorizing
 the final code.
 
-## 16. Core Python functions and decisions
+## 17. Core Python functions and decisions
 
 ### `money_to_kobo(value)`
 
@@ -816,7 +955,7 @@ formula. The function prefixes an apostrophe when a user-controlled category or
 note begins with such a character after whitespace. This is a conservative export
 defense; spreadsheet behavior still varies.
 
-## 17. Classes, state, and SQLite
+## 18. Classes, state, and SQLite
 
 `ExpenseStore` is a class. Each instance stores its database path in `self.path`.
 `self` means the particular object on which a method was called.
@@ -838,7 +977,7 @@ context handles transactions, and the helper closes each connection.
 All SQL values use `?` placeholders. Never replace them with string interpolation.
 A note that looks like SQL remains data rather than becoming a command.
 
-## 18. Tests and verified behavior
+## 19. Tests and verified behavior
 
 Run:
 
@@ -846,10 +985,10 @@ Run:
 python -m unittest discover -s tests -v
 ```
 
-The 2026-10-20 milestone run reported:
+The 2026-10-21 milestone run reported:
 
 ```text
-Ran 28 tests
+Ran 30 tests
 OK
 ```
 
@@ -863,12 +1002,13 @@ note clearing, SQL-looking text, CSV escaping, deletion,
 confirmation, rejected deletion IDs with row preservation, export-to-import
 behavior, fresh imported IDs, atomic rejection of an invalid later value,
 malformed CSV shapes and quote syntax, snapshot independence, refresh of an
-existing backup, same-path backup rejection, and real CLI paths.
+existing backup, same-path backup rejection, filtered JSON output, exact money
+strings, literal UTF-8 text, and real CLI paths.
 
 A passing suite proves only the listed cases passed in that environment. It does
 not prove the absence of every bug, production performance, or security readiness.
 
-## 19. Current limitations
+## 20. Current limitations
 
 - Single local user; no accounts, authentication, or per-user authorization.
 - NGN only; the schema cannot safely mix currencies.
@@ -889,13 +1029,46 @@ not prove the absence of every bug, production performance, or security readines
   undo. Refreshing a named destination replaces its previous snapshot state.
 - A backup needs enough writable local storage for another database copy.
 - CSV export overwrites the target path.
+- JSON export overwrites the target path, writes the selected rows in memory as
+  one array, and has no matching JSON import. `amount_ngn` is intentionally a
+  string rather than a JSON number.
 - A valid confirmed deletion is immediate and has no undo or audit record.
 - No API, browser interface, PostgreSQL, Docker, monitoring, or cloud deployment.
 - No measured production users, reliability, load, or business impact.
 
 These are scope boundaries, not hidden completed features.
 
-## 20. Interview questions and honest answers
+## 21. Interview questions and honest answers
+
+**What does serialization mean here?**
+It means converting an internal `sqlite3.Row` into ordinary Python values with a
+documented public shape, then encoding that list of values as JSON text.
+
+**Why add `expense_to_dict()` instead of passing `sqlite3.Row` to `json.dump()`?**
+The row object is database-specific and not directly part of JSON's supported
+types. The mapping also deliberately chooses public names and money formatting.
+
+**Why is `amount_ngn` a string instead of a JSON number?**
+The app stores exact integer kobo. A two-decimal string preserves that exact
+contract without introducing binary floating-point conversion.
+
+**Why use one JSON array rather than write one object at a time?**
+The exported selection is one collection and must be one valid JSON document.
+Repeated independent `json.dump()` calls would concatenate values without an
+array structure.
+
+**What do `ensure_ascii=False` and `indent=2` change?**
+The first keeps normal Unicode characters readable in the UTF-8 file. The second
+adds predictable whitespace so people can inspect nested data easily.
+
+**Why does JSON export call `list()`?**
+It reuses month/category validation, normalized matching, safe SQL parameters,
+ordering, and all existing filter tests instead of creating a competing query.
+
+**Can FastAPI use this file-writing method directly?**
+The row-to-dictionary mapping is reusable, but a web route would normally return
+data for the framework to encode rather than write a local JSON file. HTTP behavior
+still needs separate request/response models, tests, errors, and authorization.
 
 **Why use `Connection.backup()` instead of an ordinary file copy?**
 It asks SQLite to produce a consistent database snapshot through database
@@ -1068,7 +1241,7 @@ and API integration tests. Those features are not implemented here.
 Development used AI assistance. A truthful answer should distinguish generated or
 assisted implementation from the code personally studied, changed, and tested.
 
-## 21. Hands-on exercises
+## 22. Hands-on exercises
 
 Do these locally; reading alone is not practical mastery.
 
@@ -1143,11 +1316,19 @@ snapshot and a live reference, then run backup again and confirm when the
 destination changes. Finally, attempt to back up `live.db` onto itself and explain
 why validation happens before the target connection opens.
 
-## 22. Readiness check
+### Exercise L — Trace Python data into JSON
 
-You understand Version 1.6 when you can explain the difference between a database
-snapshot and a live reference; trace `ExpenseStore.backup()` from `Path` validation
-through both connection cleanups; justify the same-path guard and SQLite backup
-API; prove that later source changes leave an existing snapshot unchanged; refresh
-that snapshot intentionally; observe the same-path failure; and return all 28
-tests to green.
+Add food and data expenses containing a naira symbol, export only October food,
+and inspect the file with `python -m json.tool`. Before opening it, predict the
+Python type and JSON type of every field. Explain why the ID is a number but
+`amount_ngn` is text. Temporarily remove `ensure_ascii=False`, observe how the
+Unicode text changes without changing its decoded value, restore the argument,
+and return all tests to green.
+
+## 23. Readiness check
+
+You understand Version 1.7 when you can trace a filtered `sqlite3.Row` through
+`expense_to_dict()`, a list comprehension, `json.dump()`, and the final file;
+predict every Python and JSON type; justify exact money text and readable UTF-8;
+explain why the mapping can help a future API without claiming that API exists;
+break and restore one encoder option; and return all 30 tests to green.

@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout, redirect_stderr
@@ -137,6 +138,55 @@ class TrackerTests(unittest.TestCase):
             row = list(csv.DictReader(handle))[0]
         self.assertEqual(row["amount_ngn"], "12.50")
         self.assertEqual(row["note"], "'=SUM(1,2)")
+
+    def test_json_export_preserves_exact_money_unicode_and_filters(self):
+        record_id = self.store.add(
+            "12.50", " Food ", "2026-10-01", "Café lunch for ₦12.50"
+        )
+        self.store.add("20", "food", "2026-09-30", "September")
+        self.store.add("30", "data", "2026-10-02", "Weekly plan")
+        path = Path(self.temp.name) / "october-food.json"
+
+        self.assertEqual(
+            self.store.export_json(path, month="2026-10", category=" FOOD "), 1
+        )
+        raw_json = path.read_text(encoding="utf-8")
+        self.assertIn("Café lunch for ₦12.50", raw_json)
+        self.assertTrue(raw_json.endswith("\n"))
+        self.assertEqual(
+            json.loads(raw_json),
+            [{
+                "id": record_id,
+                "amount_ngn": "12.50",
+                "category": "food",
+                "date": "2026-10-01",
+                "note": "Café lunch for ₦12.50",
+            }],
+        )
+
+        empty_path = Path(self.temp.name) / "empty.json"
+        self.assertEqual(self.store.export_json(empty_path, category="transport"), 0)
+        self.assertEqual(json.loads(empty_path.read_text(encoding="utf-8")), [])
+
+    def test_cli_export_json_command(self):
+        record_id = self.store.add("1500.25", "food", "2026-10-15", "Dinner")
+        path = Path(self.temp.name) / "expenses.json"
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            main([
+                "--db", str(self.db), "export-json", str(path),
+                "--month", "2026-10", "--category", " FOOD ",
+            ])
+
+        self.assertEqual(output.getvalue().strip(), "Exported 1 expense to JSON.")
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))[0], {
+            "id": record_id,
+            "amount_ngn": "1500.25",
+            "category": "food",
+            "date": "2026-10-15",
+            "note": "Dinner",
+        })
 
     def test_import_exported_csv_uses_new_ids(self):
         source = ExpenseStore(Path(self.temp.name) / "source.db")

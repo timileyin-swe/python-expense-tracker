@@ -37,11 +37,11 @@ def main(argv=None):
     update.add_argument("--category", help="New category")
     update.add_argument("--date", dest="spent_on", help="New date using YYYY-MM-DD")
     update.add_argument("--note", help="New note; pass an empty string to clear it")
-    for name in ("list", "summary", "export"):
+    for name in ("list", "summary", "export", "export-json"):
         command = commands.add_parser(name)
         command.add_argument("--month", help="Filter using YYYY-MM")
         command.add_argument("--category", help="Filter by exact category")
-        if name == "export":
+        if name in ("export", "export-json"):
             command.add_argument("path")
     import_command = commands.add_parser("import", help="Import expenses from CSV")
     import_command.add_argument("path")
@@ -86,6 +86,9 @@ def main(argv=None):
         elif args.command == "export":
             count = store.export(args.path, args.month, args.category)
             print(f"Exported {format_expense_count(count)}.")
+        elif args.command == "export-json":
+            count = store.export_json(args.path, args.month, args.category)
+            print(f"Exported {format_expense_count(count)} to JSON.")
         elif args.command == "import":
             count = store.import_csv(args.path)
             print(f"Imported {format_expense_count(count)}.")

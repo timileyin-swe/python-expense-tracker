@@ -23,6 +23,9 @@
 - Version 1.6: create or refresh a consistent SQLite backup at a separate path,
   including parent-folder creation, same-path rejection, snapshot-independence
   tests, and a documented `backup PATH` command.
+- Version 1.7: export month/category selections as readable UTF-8 JSON through a
+  reusable row-to-dictionary mapping, preserving money as exact decimal text and
+  Unicode notes without adding dependencies.
 
 ## Next small milestones
 

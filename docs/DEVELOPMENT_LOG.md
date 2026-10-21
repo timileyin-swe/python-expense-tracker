@@ -1,5 +1,53 @@
 # Development log
 
+## 2026-10-21 — Export filtered expenses as JSON
+
+### Completed
+
+- Added `expense_to_dict(row)` to map internal SQLite column names and integer
+  kobo into a JSON-compatible public record.
+- Represented `amount_ngn` as a two-decimal string rather than a binary
+  floating-point number, preserving the same exact money contract as CSV export.
+- Added `ExpenseStore.export_json(path, month=None, category=None)`, which reuses
+  `list()` so unfiltered, month-only, category-only, and combined selections follow
+  the existing validated query path.
+- Wrote one indented UTF-8 JSON array with `ensure_ascii=False` and a final newline
+  so Unicode notes remain readable and common command-line tools handle the file
+  cleanly.
+- Added `export-json PATH` with `--month` and `--category` options, and reused the
+  existing singular/plural count formatter.
+- Ignored generated `*.json` files and updated the README, study guide, and
+  development plan to Version 1.7.
+
+### Tested
+
+- `python -m compileall -q expense_tracker tests`: completed successfully.
+- Two focused storage and CLI JSON-export tests passed.
+- `python -m unittest discover -s tests -v`: 30 tests passed.
+- Verified exact `"12.50"` and `"1500.25"` money strings, integer IDs, documented
+  field names, combined month/category filtering, a trailing newline, and direct
+  parsing with `json.loads()`.
+- Verified `Café` and the naira symbol remain literal UTF-8 text in the file.
+- Rehearsed the real CLI with food and data expenses: the filtered command
+  reported `Exported 1 expense to JSON.` and `python -m json.tool` accepted the
+  generated document.
+
+### Pending
+
+- Hands-on learner completion of the Version 1.7 dictionary/JSON exercise.
+- Continue the separate job-application API after functions, modules, exceptions,
+  serialization, and resource cleanup have been demonstrated through practical
+  Python work.
+- Later progression to PostgreSQL, queues, Docker, monitoring, an AI document
+  assistant, and optional cloud deployment.
+
+### Blocked
+
+- Publishing the prepared job-application API remains blocked: the intended
+  repository still does not exist and repository creation is unavailable through
+  the connected GitHub actions. The starter bundle remains preserved separately;
+  no unrelated repository was modified.
+
 ## 2026-10-20 — Add consistent database backups
 
 ### Completed
