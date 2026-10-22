@@ -188,6 +188,44 @@ class TrackerTests(unittest.TestCase):
             "note": "Dinner",
         })
 
+    def test_exports_reject_database_path_without_destroying_data(self):
+        record_id = self.store.add("10", "food", "2026-10-22", "Keep me")
+
+        destinations = (
+            ("export", self.db),
+            ("export_json", self.db.parent / "missing" / ".." / self.db.name),
+        )
+        for method_name, destination in destinations:
+            with self.subTest(method_name=method_name), self.assertRaisesRegex(
+                ValueError, "Export path must be different from the database path"
+            ):
+                getattr(self.store, method_name)(destination)
+
+            reopened = ExpenseStore(self.db)
+            self.assertEqual(reopened.get(record_id)["note"], "Keep me")
+
+        hard_link = self.db.with_name("hard-link.db")
+        hard_link.hardlink_to(self.db)
+        with self.assertRaisesRegex(
+            ValueError, "Export path must be different from the database path"
+        ):
+            self.store.export_json(hard_link)
+        self.assertEqual(ExpenseStore(self.db).get(record_id)["note"], "Keep me")
+
+    def test_cli_rejects_export_to_database_path(self):
+        record_id = self.store.add("10", "food", "2026-10-22", "Keep me")
+        error_output = io.StringIO()
+
+        with redirect_stderr(error_output), self.assertRaises(SystemExit) as exc:
+            main(["--db", str(self.db), "export-json", str(self.db)])
+
+        self.assertEqual(exc.exception.code, 2)
+        self.assertIn(
+            "Export path must be different from the database path.",
+            error_output.getvalue(),
+        )
+        self.assertEqual(ExpenseStore(self.db).get(record_id)["note"], "Keep me")
+
     def test_import_exported_csv_uses_new_ids(self):
         source = ExpenseStore(Path(self.temp.name) / "source.db")
         source.add("12.50", "Food", "2026-10-01", "Lunch")

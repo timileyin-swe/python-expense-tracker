@@ -54,6 +54,21 @@ def csv_safe(value):
     return value
 
 
+def distinct_destination(path, database_path, operation):
+    """Return a destination that does not identify the live database."""
+    destination = Path(path)
+    database_path = Path(database_path)
+    same_resolved_path = destination.resolve() == database_path.resolve()
+    same_existing_file = (
+        destination.exists() and destination.samefile(database_path)
+    )
+    if same_resolved_path or same_existing_file:
+        raise ValueError(
+            f"{operation} path must be different from the database path."
+        )
+    return destination
+
+
 def expense_to_dict(row):
     """Convert one expense row to a JSON-compatible public representation."""
     return {
@@ -187,9 +202,7 @@ class ExpenseStore:
 
     def backup(self, path):
         """Create a consistent SQLite backup at a different path."""
-        destination = Path(path)
-        if destination.resolve() == self.path.resolve():
-            raise ValueError("Backup path must be different from the database path.")
+        destination = distinct_destination(path, self.path, "Backup")
         destination.parent.mkdir(parents=True, exist_ok=True)
 
         with self.connect() as source:
@@ -202,8 +215,9 @@ class ExpenseStore:
         return destination
 
     def export(self, path, month=None, category=None):
+        destination = distinct_destination(path, self.path, "Export")
         rows = self.list(month, category)
-        with open(path, "w", encoding="utf-8", newline="") as handle:
+        with destination.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerow(EXPORT_COLUMNS)
             for row in rows:
@@ -215,8 +229,9 @@ class ExpenseStore:
 
     def export_json(self, path, month=None, category=None):
         """Write selected expenses as one human-readable JSON array."""
+        destination = distinct_destination(path, self.path, "Export")
         records = [expense_to_dict(row) for row in self.list(month, category)]
-        with open(path, "w", encoding="utf-8") as handle:
+        with destination.open("w", encoding="utf-8") as handle:
             json.dump(records, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
         return len(records)

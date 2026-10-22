@@ -1,4 +1,4 @@
-# Python Expense Tracker — Version 1.7 Study Guide
+# Python Expense Tracker — Version 1.7.1 Study Guide
 
 ## 1. What this project does
 
@@ -63,8 +63,8 @@ not create another database.
 | `list` | Retrieve expenses matching optional filters | Newest date and ID first |
 | `summary` | Add matching amounts by category | Prints category totals and grand total |
 | `backup PATH` | Create or refresh a database snapshot | Rejects the live database as its destination |
-| `export PATH` | Write filtered rows to CSV | Overwrites the file and reports a grammatical count |
-| `export-json PATH` | Write filtered rows to readable JSON | Keeps exact money as decimal text |
+| `export PATH` | Write filtered rows to CSV | Refuses to overwrite the live database |
+| `export-json PATH` | Write filtered rows to readable JSON | Keeps exact money and refuses the database path |
 | `import PATH` | Strictly parse, validate, and insert CSV | Writes all or none and reports a grammatical count |
 | `delete ID --yes` | Permanently remove a row | Requires a positive ID and confirmation |
 
@@ -78,7 +78,7 @@ the same trimming and lowercasing used when an expense is added.
 | --- | --- |
 | `expense_tracker/__init__.py` | Marks the directory as a Python package |
 | `expense_tracker/__main__.py` | Parses commands, selects behavior, prints results |
-| `expense_tracker/core.py` | Validation, money conversion, persistence, backups, summaries, CSV/JSON I/O |
+| `expense_tracker/core.py` | Validation, money conversion, persistence, destination safety, backups, summaries, CSV/JSON I/O |
 | `tests/test_tracker.py` | Verifies behavior with isolated temporary databases |
 | `README.md` | Quick public overview and runnable examples |
 | `docs/STUDY_GUIDE.md` | Detailed learning reference and exercises |
@@ -97,7 +97,116 @@ terminal text -> argparse -> main() -> ExpenseStore -> SQLite file
 This separation is enough for a small project. A larger service would normally
 split request models, business services, repositories, migrations, and logging.
 
-## 5. What changed in Version 1.7
+## 5. What changed in Version 1.7.1
+
+Version 1.7.1 fixes a destructive output-path bug rather than adding a new
+command. Before this patch, both export methods eventually called `open(path,
+"w")`. Write mode truncates an existing file before new content is written. If
+the supplied export path was the live SQLite database, the exporter replaced the
+database bytes with CSV or JSON text.
+
+The bug was reproduced only inside temporary folders. A valid 8,192-byte SQLite
+database became a 67-byte CSV file or a 124-byte JSON file, and reopening it raised
+`sqlite3.DatabaseError: file is not a database`. This evidence justified a small
+safety patch while the development plan otherwise keeps the stable CLI unchanged.
+
+### Shared destination precondition
+
+`core.py` now defines:
+
+```python
+def distinct_destination(path, database_path, operation):
+    """Return a destination that does not identify the live database."""
+    destination = Path(path)
+    database_path = Path(database_path)
+    same_resolved_path = destination.resolve() == database_path.resolve()
+    same_existing_file = (
+        destination.exists() and destination.samefile(database_path)
+    )
+    if same_resolved_path or same_existing_file:
+        raise ValueError(
+            f"{operation} path must be different from the database path."
+        )
+    return destination
+```
+
+This function is a **precondition**: a rule that must be true before the main
+operation is allowed to continue. It converts both inputs to `Path` objects and
+performs two related checks:
+
+- `resolve()` makes paths absolute, eliminates `..` components, and resolves
+  symlinks. Python documents that the default non-strict mode resolves as far as
+  possible even when the future output file does not exist.
+- `samefile()` checks whether two existing paths identify the same filesystem
+  file. This catches a hard link, whose text and resolved path can differ even
+  though writing through it changes the database.
+
+The helper returns a `Path` only when neither check identifies the database.
+`operation` is a program-controlled label such as `"Export"` or `"Backup"`,
+which keeps each error message specific without duplicating the path logic.
+
+Official references:
+
+- [`Path.resolve()`](https://docs.python.org/3/library/pathlib.html#pathlib.Path.resolve)
+- [`Path.samefile()`](https://docs.python.org/3/library/pathlib.html#pathlib.Path.samefile)
+
+### Changed methods and architecture
+
+`backup()` now calls the shared helper while preserving its existing behavior:
+
+```python
+destination = distinct_destination(path, self.path, "Backup")
+```
+
+Both exporters validate before they select rows or open a file:
+
+```python
+def export(self, path, month=None, category=None):
+    destination = distinct_destination(path, self.path, "Export")
+    rows = self.list(month, category)
+    with destination.open("w", encoding="utf-8", newline="") as handle:
+        ...
+
+def export_json(self, path, month=None, category=None):
+    destination = distinct_destination(path, self.path, "Export")
+    records = [expense_to_dict(row) for row in self.list(month, category)]
+    with destination.open("w", encoding="utf-8") as handle:
+        ...
+```
+
+The validation belongs in `core.py`, not only in the CLI. Direct Python callers,
+tests, and a future API therefore receive the same protection. The CLI already
+catches `ValueError`, so no new exception-handling branch was required.
+
+### Failure trace: unsafe JSON destination
+
+For `export-json live.db` when `--db live.db`:
+
+1. `argparse` supplies the same database and output path.
+2. `ExpenseStore` opens the valid database and initializes its schema.
+3. `export_json()` calls `distinct_destination()` before calling `list()`.
+4. The resolved destination and database paths compare equal.
+5. The helper raises `ValueError`; no output handle is opened.
+6. `main()` converts the error into a normal command error with exit status 2.
+7. Reopening the database and running `show 1` still returns the original row.
+
+An alias containing `..` follows the same rejection path after normalization.
+An existing hard link is rejected by `samefile()`, even though its pathname is
+different.
+
+### Design decision and limits
+
+The check happens before file opening because checking afterward would be too
+late: write mode may already have truncated the database. A shared helper keeps
+backup, CSV export, and JSON export from drifting into different identity rules.
+
+This patch protects the live database, not every possible output collision. A
+normal export still replaces another existing CSV or JSON file without prompting.
+Exports are not atomic temporary-file replacements, and there is no versioned
+export history. Those limits remain documented rather than being presented as
+completed behavior.
+
+## 6. What changed in Version 1.7
 
 Version 1.7 adds a JSON export that connects the current command-line project to a
 core web-API concept: converting internal data into a documented public shape.
@@ -231,7 +340,7 @@ This milestone intentionally adds export only. JSON import would need an explici
 schema, type validation, duplicate rules, atomic writes, size limits, and useful
 item-level error locations rather than simply trusting `json.load()` output.
 
-## 6. What changed in Version 1.6
+## 7. What changed in Version 1.6
 
 Version 1.6 adds a safe, explicit database backup command:
 
@@ -345,7 +454,7 @@ implementation inside Python's standard library. There is intentionally no
 automatic schedule, encryption, cloud upload, retention policy, or restore
 command. A user can inspect a snapshot safely by selecting it with `--db`.
 
-## 7. What changed in Version 1.5.1
+## 8. What changed in Version 1.5.1
 
 Version 1.5.1 fixes a small but visible command-line grammar bug. The `export` and
 `import` commands previously always added the word `expenses`, which produced
@@ -416,7 +525,7 @@ grammar rather than money, validation, or persistence. `ExpenseStore.export()`,
 test can present differently. The formatter is intentionally small and tested
 directly at the important `0`, `1`, and `2` boundary values.
 
-## 8. What changed in Version 1.5
+## 9. What changed in Version 1.5
 
 Version 1.5 adds one consistent category filter to three existing commands. A user
 can now select one normalized category with `list`, calculate only that category
@@ -504,7 +613,7 @@ filter makes `Food`, ` food `, and `FOOD` equivalent without adding a second set
 rules. Reusing `list()` from `summary()` and `export()` also prevents three query
 implementations from drifting apart.
 
-## 9. What changed in Version 1.4.2
+## 10. What changed in Version 1.4.2
 
 Version 1.4.2 closes a CSV syntax gap in the atomic importer. Python's CSV reader
 is permissive by default. For example, a final field that starts with `"` but
@@ -574,7 +683,7 @@ Strict syntax checking complements the existing semantic checks: the CSV reader
 checks structure, while functions such as `money_to_kobo()` and `valid_date()`
 check what each field means.
 
-## 10. What changed in Version 1.4.1
+## 11. What changed in Version 1.4.1
 
 Version 1.4.1 is a small deletion-safety patch. `get()` and `update()` already
 required a positive integer ID, but `delete()` previously sent its argument
@@ -641,7 +750,7 @@ For `python -m expense_tracker --db practice.db delete -1 --yes`:
 This patch deliberately adds no new command. It strengthens an existing contract,
 which is valuable maintenance work even though the production change is one line.
 
-## 11. What changed in Version 1.4
+## 12. What changed in Version 1.4
 
 Version 1.4 adds an atomic CSV import path. “Atomic” means one import is treated as
 a unit: all valid rows are stored, or an error leaves the database unchanged. The
@@ -721,7 +830,7 @@ Exact headers make accidental column swaps visible instead of guessing. Holding
 the prepared rows in memory keeps the beginner implementation clear, but it also
 means this version is intended for small personal files rather than huge imports.
 
-## 12. What changed in Version 1.3
+## 13. What changed in Version 1.3
 
 Version 1.3 adds a partial-update path. A user chooses one or more of `--amount`,
 `--category`, `--date`, and `--note`; every omitted field keeps its existing value.
@@ -798,7 +907,7 @@ If any supplied value is invalid, validation raises before the update statement.
 If no flags are supplied, the empty `changes` dictionary is rejected. Tests verify
 that the original row remains unchanged after each rejected attempt.
 
-## 13. What changed in Version 1.2
+## 14. What changed in Version 1.2
 
 Version 1.2 turns two documented input limits into executable contracts. No
 runtime function changed: `ExpenseStore.add()` already enforced the limits. The
@@ -844,7 +953,7 @@ For `maximum_category = "A" * 50`:
 For `"b" * 51`, the length check is true. `add()` raises `ValueError` before the
 `INSERT`, and the final row-count assertion proves that no partial record appeared.
 
-## 14. What changed in Version 1.1
+## 15. What changed in Version 1.1
 
 ### `ExpenseStore.get(expense_id)`
 
@@ -889,7 +998,7 @@ Two tests were added:
 The suite had 12 tests at Version 1.1, 14 after Version 1.2, and 17 after
 Version 1.3.
 
-## 15. Execution trace: `show 1`
+## 16. Execution trace: `show 1`
 
 Assume expense 1 already exists.
 
@@ -913,7 +1022,7 @@ Observed output from the tested practice run:
 For `show 999`, the observed message was `Expense ID not found.` and the process
 returned status 2. That nonzero status lets scripts distinguish success from error.
 
-## 16. Trace an added expense
+## 17. Trace an added expense
 
 For `python -m expense_tracker --db practice.db add 4500 groceries`:
 
@@ -929,7 +1038,7 @@ For `python -m expense_tracker --db practice.db add 4500 groceries`:
 Predict each value before running the command. That is more useful than memorizing
 the final code.
 
-## 17. Core Python functions and decisions
+## 18. Core Python functions and decisions
 
 ### `money_to_kobo(value)`
 
@@ -955,7 +1064,7 @@ formula. The function prefixes an apostrophe when a user-controlled category or
 note begins with such a character after whitespace. This is a conservative export
 defense; spreadsheet behavior still varies.
 
-## 18. Classes, state, and SQLite
+## 19. Classes, state, and SQLite
 
 `ExpenseStore` is a class. Each instance stores its database path in `self.path`.
 `self` means the particular object on which a method was called.
@@ -977,7 +1086,7 @@ context handles transactions, and the helper closes each connection.
 All SQL values use `?` placeholders. Never replace them with string interpolation.
 A note that looks like SQL remains data rather than becoming a command.
 
-## 19. Tests and verified behavior
+## 20. Tests and verified behavior
 
 Run:
 
@@ -985,10 +1094,10 @@ Run:
 python -m unittest discover -s tests -v
 ```
 
-The 2026-10-21 milestone run reported:
+The 2026-10-22 milestone run reported:
 
 ```text
-Ran 30 tests
+Ran 32 tests
 OK
 ```
 
@@ -1003,12 +1112,14 @@ confirmation, rejected deletion IDs with row preservation, export-to-import
 behavior, fresh imported IDs, atomic rejection of an invalid later value,
 malformed CSV shapes and quote syntax, snapshot independence, refresh of an
 existing backup, same-path backup rejection, filtered JSON output, exact money
-strings, literal UTF-8 text, and real CLI paths.
+strings, literal UTF-8 text, rejection of exact, normalized-alias, and hard-link
+database export destinations, preservation after rejected exports, and real CLI
+paths.
 
 A passing suite proves only the listed cases passed in that environment. It does
 not prove the absence of every bug, production performance, or security readiness.
 
-## 20. Current limitations
+## 21. Current limitations
 
 - Single local user; no accounts, authentication, or per-user authorization.
 - NGN only; the schema cannot safely mix currencies.
@@ -1028,17 +1139,40 @@ not prove the absence of every bug, production performance, or security readines
   schedule, rotation, encryption, remote upload, restore command, or record-level
   undo. Refreshing a named destination replaces its previous snapshot state.
 - A backup needs enough writable local storage for another database copy.
-- CSV export overwrites the target path.
-- JSON export overwrites the target path, writes the selected rows in memory as
-  one array, and has no matching JSON import. `amount_ngn` is intentionally a
-  string rather than a JSON number.
+- CSV export refuses a destination that identifies the live database, but
+  otherwise overwrites the target path without prompting.
+- JSON export has the same database-path guard, but otherwise overwrites its
+  target, writes selected rows in memory as one array, and has no matching JSON
+  import. `amount_ngn` is intentionally a string rather than a JSON number.
 - A valid confirmed deletion is immediate and has no undo or audit record.
 - No API, browser interface, PostgreSQL, Docker, monitoring, or cloud deployment.
 - No measured production users, reliability, load, or business impact.
 
 These are scope boundaries, not hidden completed features.
 
-## 21. Interview questions and honest answers
+## 22. Interview questions and honest answers
+
+**What was the Version 1.7.1 bug?**
+An export destination could be the live SQLite file. Opening that path in write
+mode truncated the database before CSV or JSON was written.
+
+**Why validate inside the storage layer rather than only in `main()`?**
+The storage methods can be called directly by tests, scripts, or a future API.
+Putting the precondition beside the file operation protects every caller.
+
+**Why use both `resolve()` and `samefile()`?**
+`resolve()` normalizes absolute paths, `..` components, and symlinks, including
+a future output that does not yet exist. `samefile()` compares the identity of
+two existing files and additionally catches hard links.
+
+**Why must validation happen before `open(..., "w")`?**
+Write mode can truncate an existing file immediately. Once the handle is opened,
+checking the path is too late to guarantee preservation.
+
+**Does the guard prevent every overwrite?**
+No. It specifically protects the live database. A different existing export file
+can still be replaced, and the project does not yet implement atomic export
+replacement or output history.
 
 **What does serialization mean here?**
 It means converting an internal `sqlite3.Row` into ordinary Python values with a
@@ -1241,7 +1375,7 @@ and API integration tests. Those features are not implemented here.
 Development used AI assistance. A truthful answer should distinguish generated or
 assisted implementation from the code personally studied, changed, and tested.
 
-## 22. Hands-on exercises
+## 23. Hands-on exercises
 
 Do these locally; reading alone is not practical mastery.
 
@@ -1325,10 +1459,19 @@ Python type and JSON type of every field. Explain why the ID is a number but
 Unicode text changes without changing its decoded value, restore the argument,
 and return all tests to green.
 
-## 23. Readiness check
+### Exercise M — Prove the destination precondition
 
-You understand Version 1.7 when you can trace a filtered `sqlite3.Row` through
-`expense_to_dict()`, a list comprehension, `json.dump()`, and the final file;
-predict every Python and JSON type; justify exact money text and readable UTF-8;
-explain why the mapping can help a future API without claiming that API exists;
-break and restore one encoder option; and return all 30 tests to green.
+Create `safe.db` with one expense. Predict the result of exporting JSON to
+`safe.db`, run the command, and record its exit status and error. Then run
+`show 1` to prove the row survived. Export to `safe.json`, inspect the valid
+file, and explain why validation must run before write mode opens a destination.
+Finally, trace the values of `same_resolved_path` and `same_existing_file` for
+the safe and rejected destinations.
+
+## 24. Readiness check
+
+You understand Version 1.7.1 when you can reproduce the former risk only in a
+disposable database; explain truncation by write mode; trace an unsafe export
+through `distinct_destination()`; distinguish resolved path equality from
+existing-file identity; prove a rejected command preserves the row; complete a
+normal export to a separate path; and return all 32 tests to green.

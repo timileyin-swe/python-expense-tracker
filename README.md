@@ -3,6 +3,7 @@
 A local command-line application for recording NGN expenses, finding one expense
 by ID, filtering by month and category, viewing category totals, creating
 consistent database backups, importing CSV files, and exporting CSV or JSON.
+Exports are refused when their destination identifies the live database file.
 Built as a learning portfolio project using Python's standard library; no
 external packages are required.
 
@@ -68,6 +69,9 @@ All amounts use NGN; currencies cannot be mixed.
 - `ExpenseStore.backup()` uses SQLite's backup API to create or refresh a
   consistent snapshot, creates missing destination folders, and rejects the live
   database itself as the destination.
+- `distinct_destination()` checks normalized paths and existing file identity
+  before backup or export output is opened, preventing CSV or JSON export from
+  truncating the live SQLite database.
 - `format_expense()` gives `list`, `show`, and `update` one shared output format.
 - `format_expense_count()` gives import and export commands correct singular or
   plural count messages without duplicating grammar logic.
@@ -81,14 +85,15 @@ All amounts use NGN; currencies cannot be mixed.
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains 30 tests. It uses temporary databases and covers
+The current suite contains 32 tests. It uses temporary databases and covers
 persistence, exact money, invalid input, category and note length boundaries,
 month/category filters and totals, single-record lookup, partial updates, rejected
 updates, filtered CSV export, atomic CSV import, malformed headers, fields and
 quoted syntax, singular/plural count messages, SQL-looking notes, deletion
 confirmation, rejected deletion IDs, independent and refreshed database backups,
 same-path backup rejection, filtered JSON export, exact JSON money strings,
-Unicode preservation, and CLI commands.
+Unicode preservation, destructive export-path rejection, database preservation,
+and CLI commands.
 
 ## Learn the project
 
@@ -101,7 +106,8 @@ future milestones without presenting them as finished features.
 
 This is a single-user local CLI, with no web interface, authentication, encryption,
 or cloud deployment. Category filtering is an exact normalized match, not partial
-or fuzzy search. CSV and JSON exports overwrite their specified output files.
+or fuzzy search. CSV and JSON exports overwrite specified output files other than
+the live database; they do not prompt before replacing another existing export.
 JSON export writes `amount_ngn` as a string for exact decimal text, and JSON import
 is not implemented. CSV import accepts only its documented headers, generates new
 IDs, and does not detect duplicates. The backup command creates a full local

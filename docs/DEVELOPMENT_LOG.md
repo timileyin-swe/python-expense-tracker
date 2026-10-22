@@ -1,5 +1,52 @@
 # Development log
 
+## 2026-10-22 — Prevent exports from overwriting the live database
+
+### Completed
+
+- Reproduced a destructive path collision only in disposable databases: CSV and
+  JSON export opened the live SQLite file in write mode and left it unreadable.
+- Added `distinct_destination(path, database_path, operation)` as one reusable
+  precondition for database backup and both export formats.
+- Compared resolved paths so absolute/relative spellings, `..` components, and
+  symlinks cannot disguise the database as a different destination.
+- Used `Path.samefile()` when the destination already exists so a hard link to
+  the live database is also rejected.
+- Validated the destination before querying rows or opening an output handle.
+- Preserved the existing backup error contract while making CSV and JSON export
+  raise `Export path must be different from the database path.`
+- Updated the README, study guide, and development plan to Version 1.7.1.
+
+### Tested
+
+- `python -m compileall -q expense_tracker tests`: completed successfully.
+- Two focused storage and CLI regression tests passed.
+- `python -m unittest discover -s tests -v`: 32 tests passed.
+- Proved CSV rejects the exact database path, JSON rejects a normalized alias
+  containing a missing directory plus `..`, and JSON rejects an existing hard
+  link to the database.
+- Reopened the database after every rejected call and verified the original
+  expense and note remained readable.
+- Rehearsed the real CLI: the unsafe export exited with status 2, named the path
+  rule, and `show 1` still returned the original row.
+- Rechecked normal filtered CSV and JSON exports to separate paths.
+
+### Pending
+
+- Hands-on learner completion of the Version 1.7.1 path-safety exercise.
+- Continue the separate job-application API after functions, modules, exceptions,
+  serialization, and resource cleanup have been demonstrated through practical
+  Python work.
+- Later progression to PostgreSQL, queues, Docker, monitoring, an AI document
+  assistant, and optional cloud deployment.
+
+### Blocked
+
+- Publishing the prepared job-application API remains blocked: the intended
+  repository still does not exist and repository creation is unavailable through
+  the connected GitHub actions. The starter bundle remains preserved separately;
+  no unrelated repository was modified.
+
 ## 2026-10-21 — Export filtered expenses as JSON
 
 ### Completed

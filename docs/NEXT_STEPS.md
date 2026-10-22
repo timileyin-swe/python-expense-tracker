@@ -26,6 +26,9 @@
 - Version 1.7: export month/category selections as readable UTF-8 JSON through a
   reusable row-to-dictionary mapping, preserving money as exact decimal text and
   Unicode notes without adding dependencies.
+- Version 1.7.1: prevent CSV and JSON export destinations from identifying the
+  live SQLite database, including normalized aliases and hard links, before an
+  output file is opened.
 
 ## Next small milestones
 
