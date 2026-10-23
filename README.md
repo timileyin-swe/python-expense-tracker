@@ -4,6 +4,8 @@ A local command-line application for recording NGN expenses, finding one expense
 by ID, filtering by month and category, viewing category totals, creating
 consistent database backups, importing CSV files, and exporting CSV or JSON.
 Exports are refused when their destination identifies the live database file.
+Every command includes built-in help, including its positional arguments and
+options.
 Built as a learning portfolio project using Python's standard library; no
 external packages are required.
 
@@ -13,6 +15,8 @@ Install Python 3.10 or newer, clone this repository, and open a terminal in its
 folder. On Windows, replace `python` with `py` if necessary.
 
 ```sh
+python -m expense_tracker --help
+python -m expense_tracker export-json --help
 python -m expense_tracker --db practice.db add 4500 groceries --date 2026-10-14 --note "Rice and vegetables"
 python -m expense_tracker --db practice.db add 2000 data --date 2026-10-14 --note "Weekly mobile data"
 python -m expense_tracker --db practice.db update 1 --amount 5200.50 --category household --note ""
@@ -45,7 +49,8 @@ All amounts use NGN; currencies cannot be mixed.
 
 ## Design
 
-- `argparse` turns terminal input into commands.
+- `argparse` turns terminal input into commands and generates the tested top-level
+  and command-specific help screens from parser metadata.
 - Validation rejects invalid dates, nonpositive amounts, fractional kobo, and
   invalid IDs.
 - Categories are trimmed, lowercased, and limited to 50 characters. Notes are
@@ -85,7 +90,7 @@ All amounts use NGN; currencies cannot be mixed.
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains 32 tests. It uses temporary databases and covers
+The current suite contains 34 tests. It uses temporary databases and covers
 persistence, exact money, invalid input, category and note length boundaries,
 month/category filters and totals, single-record lookup, partial updates, rejected
 updates, filtered CSV export, atomic CSV import, malformed headers, fields and
@@ -93,7 +98,8 @@ quoted syntax, singular/plural count messages, SQL-looking notes, deletion
 confirmation, rejected deletion IDs, independent and refreshed database backups,
 same-path backup rejection, filtered JSON export, exact JSON money strings,
 Unicode preservation, destructive export-path rejection, database preservation,
-and CLI commands.
+complete command help, successful help exits without database creation, and CLI
+commands.
 
 ## Learn the project
 

@@ -25,6 +25,45 @@ class TrackerTests(unittest.TestCase):
         self.assertEqual(format_expense_count(1), "1 expense")
         self.assertEqual(format_expense_count(2), "2 expenses")
 
+    def test_cli_help_describes_every_command_without_creating_database(self):
+        help_db = Path(self.temp.name) / "help-only.db"
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaises(SystemExit) as exc:
+            main(["--db", str(help_db), "--help"])
+
+        self.assertEqual(exc.exception.code, 0)
+        for description in (
+            "Record an expense",
+            "Show one expense by ID",
+            "Change selected fields on one expense",
+            "List matching expenses",
+            "Summarize matching expenses by category",
+            "Export matching expenses to CSV",
+            "Export matching expenses to JSON",
+            "Import expenses from CSV",
+            "Create a consistent database backup",
+            "Permanently delete an expense",
+        ):
+            with self.subTest(description=description):
+                self.assertIn(description, output.getvalue())
+        self.assertIn("SQLite database path", output.getvalue())
+        self.assertFalse(help_db.exists())
+
+    def test_export_json_help_describes_path_and_filters(self):
+        help_db = Path(self.temp.name) / "help-only.db"
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaises(SystemExit) as exc:
+            main(["--db", str(help_db), "export-json", "--help"])
+
+        self.assertEqual(exc.exception.code, 0)
+        self.assertIn("Export matching expenses to JSON.", output.getvalue())
+        self.assertIn("Destination JSON file", output.getvalue())
+        self.assertIn("Filter using YYYY-MM", output.getvalue())
+        self.assertIn("Filter by exact category", output.getvalue())
+        self.assertFalse(help_db.exists())
+
     def test_invalid_money(self):
         for value in ("0", "-1", "nan", "Infinity", "abc", "1.001", "1e100"):
             with self.subTest(value=value), self.assertRaises(ValueError):

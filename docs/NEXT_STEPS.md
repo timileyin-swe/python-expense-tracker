@@ -29,6 +29,9 @@
 - Version 1.7.1: prevent CSV and JSON export destinations from identifying the
   live SQLite database, including normalized aliases and hard links, before an
   output file is opened.
+- Version 1.7.2: make the CLI self-describing with complete top-level command
+  summaries, command-specific descriptions, positional-argument labels, and a
+  documented global database option; verify help exits before database creation.
 
 ## Next small milestones
 

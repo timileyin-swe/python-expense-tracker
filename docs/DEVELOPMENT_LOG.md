@@ -1,5 +1,50 @@
 # Development log
 
+## 2026-10-23 — Complete the command-line help
+
+### Completed
+
+- Audited the real top-level and `export-json` help screens before changing code.
+  The audit found blank top-level descriptions for `list`, `summary`, `export`,
+  `export-json`, and `delete`, plus unlabeled path arguments and `--db` option.
+- Added a short top-level summary and a command-specific description for every
+  subcommand without changing any storage or command execution behavior.
+- Added clear help for the global SQLite database path, expense IDs, amounts,
+  categories, dates, notes, import/export paths, and backup destination.
+- Kept the four filtered commands in one dictionary-driven parser loop so their
+  shared month/category options stay consistent while each command remains named.
+- Added regression tests that treat help text, successful exit status, and the
+  absence of database side effects as observable behavior.
+- Updated the README, study guide, and development plan to Version 1.7.2.
+
+### Tested
+
+- `python -m compileall -q expense_tracker tests`: completed successfully.
+- Two focused command-help tests passed.
+- `python -m unittest discover -s tests -v`: 34 tests passed.
+- Verified `python -m expense_tracker --help` lists all ten commands with a
+  description and explains `--db DB` as the SQLite database path.
+- Verified `python -m expense_tracker export-json --help` explains the JSON
+  destination and both filters.
+- Proved both help paths exit with status 0 before `ExpenseStore` creates the
+  deliberately unused database file.
+
+### Pending
+
+- Hands-on learner completion of the Version 1.7.2 help-path exercise.
+- Continue the separate job-application API after functions, modules, exceptions,
+  serialization, and resource cleanup have been demonstrated through practical
+  Python work.
+- Later progression to PostgreSQL, queues, Docker, monitoring, an AI document
+  assistant, and optional cloud deployment.
+
+### Blocked
+
+- Publishing the prepared job-application API remains blocked: the intended
+  repository still does not exist and repository creation is unavailable through
+  the connected GitHub actions. The starter bundle remains preserved separately;
+  no unrelated repository was modified.
+
 ## 2026-10-22 — Prevent exports from overwriting the live database
 
 ### Completed

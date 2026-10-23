@@ -1,4 +1,4 @@
-# Python Expense Tracker — Version 1.7.1 Study Guide
+# Python Expense Tracker — Version 1.7.2 Study Guide
 
 ## 1. What this project does
 
@@ -25,6 +25,8 @@ Install Python 3.10 or newer. Open a terminal in the downloaded or cloned projec
 folder. Use a disposable database while learning:
 
 ```sh
+python -m expense_tracker --help
+python -m expense_tracker export-json --help
 python -m expense_tracker --db practice.db add 4500 groceries --date 2026-10-14 --note "Rice and vegetables"
 python -m expense_tracker --db practice.db add 2000 data --date 2026-10-14 --note "Weekly mobile data"
 python -m expense_tracker --db practice.db update 1 --amount 5200.50 --category household --note ""
@@ -72,12 +74,16 @@ not create another database.
 `list`, `summary`, `export`, and `export-json`. Category matching is exact after
 the same trimming and lowercasing used when an expense is added.
 
+Run `python -m expense_tracker COMMAND --help` to inspect one command before using
+it. Help is a successful read-only path: it exits with status 0 before the
+application creates or opens an expense database.
+
 ## 4. Project architecture
 
 | File | Responsibility |
 | --- | --- |
 | `expense_tracker/__init__.py` | Marks the directory as a Python package |
-| `expense_tracker/__main__.py` | Parses commands, selects behavior, prints results |
+| `expense_tracker/__main__.py` | Describes and parses commands, selects behavior, prints results |
 | `expense_tracker/core.py` | Validation, money conversion, persistence, destination safety, backups, summaries, CSV/JSON I/O |
 | `tests/test_tracker.py` | Verifies behavior with isolated temporary databases |
 | `README.md` | Quick public overview and runnable examples |
@@ -97,7 +103,171 @@ terminal text -> argparse -> main() -> ExpenseStore -> SQLite file
 This separation is enough for a small project. A larger service would normally
 split request models, business services, repositories, migrations, and logging.
 
-## 5. What changed in Version 1.7.1
+## 5. What changed in Version 1.7.2
+
+Version 1.7.2 makes the existing CLI self-describing. Before this milestone, the
+commands worked, but the real top-level help displayed blank rows for `list`,
+`summary`, `export`, `export-json`, and `delete`. The global `--db` option had no
+explanation, and command help showed important positional inputs only as `path`
+or `id`.
+
+No database behavior changed. The milestone improves the parser metadata that
+`argparse` already uses to generate help, then adds regression tests for the text,
+exit status, and lack of side effects.
+
+### Implemented behavior
+
+The top-level command now explains all ten choices:
+
+```text
+add                 Record an expense
+show                Show one expense by ID
+update              Change selected fields on one expense
+list                List matching expenses
+summary             Summarize matching expenses by category
+export              Export matching expenses to CSV
+export-json         Export matching expenses to JSON
+import              Import expenses from CSV
+backup              Create a consistent database backup
+delete              Permanently delete an expense
+```
+
+It also labels `--db DB` as the SQLite database path. Each command has its own
+description, and its positional arguments now state what value is expected. For
+example, `export-json --help` identifies `path` as the destination JSON file and
+explains both optional filters.
+
+Help follows normal command-line conventions:
+
+- `--help` and `-h` print to standard output;
+- help exits with status 0 because the request succeeded;
+- invalid input still exits with status 2 through `parser.error()`; and
+- asking for help stops argument parsing before `ExpenseStore(args.db)` runs.
+
+### Changed parser construction
+
+The global option now supplies its own `help` text:
+
+```python
+parser.add_argument(
+    "--db",
+    default=str(Path.home() / ".expense-tracker" / "expenses.db"),
+    help="SQLite database path",
+)
+```
+
+For a subcommand, `help=` and `description=` serve different screens. The short
+`help` value appears beside the command in the parent parser's list. The
+`description` appears when that particular command receives `--help`:
+
+```python
+show = commands.add_parser(
+    "show", help="Show one expense by ID", description="Show one expense by ID."
+)
+show.add_argument("id", type=int, help="Positive expense ID")
+```
+
+The four commands that share month/category filters remain in one loop. A
+dictionary gives every command a specific summary without duplicating the shared
+arguments:
+
+```python
+filtered_commands = {
+    "list": "List matching expenses",
+    "summary": "Summarize matching expenses by category",
+    "export": "Export matching expenses to CSV",
+    "export-json": "Export matching expenses to JSON",
+}
+for name, help_text in filtered_commands.items():
+    command = commands.add_parser(
+        name, help=help_text, description=f"{help_text}."
+    )
+    command.add_argument("--month", help="Filter using YYYY-MM")
+    command.add_argument("--category", help="Filter by exact category")
+```
+
+Export paths differ by file type, so the loop adds a contextual positional label:
+
+```python
+if name in ("export", "export-json"):
+    file_type = "CSV" if name == "export" else "JSON"
+    command.add_argument("path", help=f"Destination {file_type} file")
+```
+
+Python's official `argparse` documentation explains that a subparser's `help=`
+value is shown in the parent help and that requesting a subparser's help prints
+only that parser's arguments:
+
+- [`argparse` subcommands](https://docs.python.org/3.10/library/argparse.html#sub-commands)
+- [`ArgumentParser.add_argument()`](https://docs.python.org/3.10/library/argparse.html#the-add-argument-method)
+
+### Architecture and execution order
+
+Help metadata stays in the command-line layer. `core.py` still owns validation,
+SQLite, backups, and exports, while `__main__.py` owns terminal names and
+explanations. A future HTTP API would reuse the storage behavior but would not
+reuse terminal help wording.
+
+The placement of `parse_args()` before `ExpenseStore` creates an important
+side-effect boundary:
+
+```python
+args = parser.parse_args(argv)
+try:
+    store = ExpenseStore(args.db)
+    ...
+```
+
+`argparse` implements help as an action that prints and raises `SystemExit(0)`
+inside `parse_args()`. Execution therefore never reaches the `try` block or opens
+the database when help is requested.
+
+### Execution trace: top-level help
+
+For `python -m expense_tracker --db help-only.db --help`:
+
+1. `main()` creates the parent parser and every subparser from their metadata.
+2. `parse_args()` sees the built-in help action.
+3. The parent parser formats its usage, description, ten command summaries, and
+   global options.
+4. It writes the text to standard output and raises `SystemExit(0)`.
+5. `ExpenseStore` is never constructed, so `help-only.db` does not appear.
+
+The first new regression test captures standard output, checks all ten summaries
+and the `--db` explanation, checks exit code 0, and asserts the unused database
+path still does not exist.
+
+### Execution trace: command-specific help
+
+For `python -m expense_tracker --db help-only.db export-json --help`:
+
+1. The parent parser selects the `export-json` subparser.
+2. That subparser handles its own help action before requiring a real export path.
+3. The output includes the command description, `Destination JSON file`,
+   `Filter using YYYY-MM`, and `Filter by exact category`.
+4. `SystemExit(0)` stops execution before storage or file output begins.
+
+The second regression test verifies those four pieces, the successful status,
+and the absence of the deliberately unused database file.
+
+### Testing and design decisions
+
+Tests assert meaningful phrases instead of comparing every space in the rendered
+screen. `argparse` may wrap lines differently as command names, terminal widths,
+or Python versions change; the public descriptions and exit behavior are the
+contract that matters here.
+
+The tests use `redirect_stdout()` because successful help is printed to standard
+output. They use `assertRaises(SystemExit)` because command help normally ends the
+process rather than returning a namespace. Checking `exc.exception.code == 0`
+distinguishes successful help from an error exit.
+
+This milestone intentionally does not add shell completion, translated messages,
+a manual page, interactive prompts, or a web UI. It does not change command
+semantics. The built-in text is a concise terminal reference, while the README
+and this guide still explain workflows and design in more depth.
+
+## 6. What changed in Version 1.7.1
 
 Version 1.7.1 fixes a destructive output-path bug rather than adding a new
 command. Before this patch, both export methods eventually called `open(path,
@@ -206,7 +376,7 @@ Exports are not atomic temporary-file replacements, and there is no versioned
 export history. Those limits remain documented rather than being presented as
 completed behavior.
 
-## 6. What changed in Version 1.7
+## 7. What changed in Version 1.7
 
 Version 1.7 adds a JSON export that connects the current command-line project to a
 core web-API concept: converting internal data into a documented public shape.
@@ -340,7 +510,7 @@ This milestone intentionally adds export only. JSON import would need an explici
 schema, type validation, duplicate rules, atomic writes, size limits, and useful
 item-level error locations rather than simply trusting `json.load()` output.
 
-## 7. What changed in Version 1.6
+## 8. What changed in Version 1.6
 
 Version 1.6 adds a safe, explicit database backup command:
 
@@ -454,7 +624,7 @@ implementation inside Python's standard library. There is intentionally no
 automatic schedule, encryption, cloud upload, retention policy, or restore
 command. A user can inspect a snapshot safely by selecting it with `--db`.
 
-## 8. What changed in Version 1.5.1
+## 9. What changed in Version 1.5.1
 
 Version 1.5.1 fixes a small but visible command-line grammar bug. The `export` and
 `import` commands previously always added the word `expenses`, which produced
@@ -525,7 +695,7 @@ grammar rather than money, validation, or persistence. `ExpenseStore.export()`,
 test can present differently. The formatter is intentionally small and tested
 directly at the important `0`, `1`, and `2` boundary values.
 
-## 9. What changed in Version 1.5
+## 10. What changed in Version 1.5
 
 Version 1.5 adds one consistent category filter to three existing commands. A user
 can now select one normalized category with `list`, calculate only that category
@@ -613,7 +783,7 @@ filter makes `Food`, ` food `, and `FOOD` equivalent without adding a second set
 rules. Reusing `list()` from `summary()` and `export()` also prevents three query
 implementations from drifting apart.
 
-## 10. What changed in Version 1.4.2
+## 11. What changed in Version 1.4.2
 
 Version 1.4.2 closes a CSV syntax gap in the atomic importer. Python's CSV reader
 is permissive by default. For example, a final field that starts with `"` but
@@ -683,7 +853,7 @@ Strict syntax checking complements the existing semantic checks: the CSV reader
 checks structure, while functions such as `money_to_kobo()` and `valid_date()`
 check what each field means.
 
-## 11. What changed in Version 1.4.1
+## 12. What changed in Version 1.4.1
 
 Version 1.4.1 is a small deletion-safety patch. `get()` and `update()` already
 required a positive integer ID, but `delete()` previously sent its argument
@@ -750,7 +920,7 @@ For `python -m expense_tracker --db practice.db delete -1 --yes`:
 This patch deliberately adds no new command. It strengthens an existing contract,
 which is valuable maintenance work even though the production change is one line.
 
-## 12. What changed in Version 1.4
+## 13. What changed in Version 1.4
 
 Version 1.4 adds an atomic CSV import path. “Atomic” means one import is treated as
 a unit: all valid rows are stored, or an error leaves the database unchanged. The
@@ -830,7 +1000,7 @@ Exact headers make accidental column swaps visible instead of guessing. Holding
 the prepared rows in memory keeps the beginner implementation clear, but it also
 means this version is intended for small personal files rather than huge imports.
 
-## 13. What changed in Version 1.3
+## 14. What changed in Version 1.3
 
 Version 1.3 adds a partial-update path. A user chooses one or more of `--amount`,
 `--category`, `--date`, and `--note`; every omitted field keeps its existing value.
@@ -907,7 +1077,7 @@ If any supplied value is invalid, validation raises before the update statement.
 If no flags are supplied, the empty `changes` dictionary is rejected. Tests verify
 that the original row remains unchanged after each rejected attempt.
 
-## 14. What changed in Version 1.2
+## 15. What changed in Version 1.2
 
 Version 1.2 turns two documented input limits into executable contracts. No
 runtime function changed: `ExpenseStore.add()` already enforced the limits. The
@@ -953,7 +1123,7 @@ For `maximum_category = "A" * 50`:
 For `"b" * 51`, the length check is true. `add()` raises `ValueError` before the
 `INSERT`, and the final row-count assertion proves that no partial record appeared.
 
-## 15. What changed in Version 1.1
+## 16. What changed in Version 1.1
 
 ### `ExpenseStore.get(expense_id)`
 
@@ -998,7 +1168,7 @@ Two tests were added:
 The suite had 12 tests at Version 1.1, 14 after Version 1.2, and 17 after
 Version 1.3.
 
-## 16. Execution trace: `show 1`
+## 17. Execution trace: `show 1`
 
 Assume expense 1 already exists.
 
@@ -1022,7 +1192,7 @@ Observed output from the tested practice run:
 For `show 999`, the observed message was `Expense ID not found.` and the process
 returned status 2. That nonzero status lets scripts distinguish success from error.
 
-## 17. Trace an added expense
+## 18. Trace an added expense
 
 For `python -m expense_tracker --db practice.db add 4500 groceries`:
 
@@ -1038,7 +1208,7 @@ For `python -m expense_tracker --db practice.db add 4500 groceries`:
 Predict each value before running the command. That is more useful than memorizing
 the final code.
 
-## 18. Core Python functions and decisions
+## 19. Core Python functions and decisions
 
 ### `money_to_kobo(value)`
 
@@ -1064,7 +1234,7 @@ formula. The function prefixes an apostrophe when a user-controlled category or
 note begins with such a character after whitespace. This is a conservative export
 defense; spreadsheet behavior still varies.
 
-## 19. Classes, state, and SQLite
+## 20. Classes, state, and SQLite
 
 `ExpenseStore` is a class. Each instance stores its database path in `self.path`.
 `self` means the particular object on which a method was called.
@@ -1086,7 +1256,7 @@ context handles transactions, and the helper closes each connection.
 All SQL values use `?` placeholders. Never replace them with string interpolation.
 A note that looks like SQL remains data rather than becoming a command.
 
-## 20. Tests and verified behavior
+## 21. Tests and verified behavior
 
 Run:
 
@@ -1094,10 +1264,10 @@ Run:
 python -m unittest discover -s tests -v
 ```
 
-The 2026-10-22 milestone run reported:
+The 2026-10-23 milestone run reported:
 
 ```text
-Ran 32 tests
+Ran 34 tests
 OK
 ```
 
@@ -1114,12 +1284,14 @@ malformed CSV shapes and quote syntax, snapshot independence, refresh of an
 existing backup, same-path backup rejection, filtered JSON output, exact money
 strings, literal UTF-8 text, rejection of exact, normalized-alias, and hard-link
 database export destinations, preservation after rejected exports, and real CLI
-paths.
+paths. The two newest tests also verify all ten top-level command descriptions,
+the global database explanation, command-specific JSON export help, successful
+help exit status, and no database creation on either help path.
 
 A passing suite proves only the listed cases passed in that environment. It does
 not prove the absence of every bug, production performance, or security readiness.
 
-## 21. Current limitations
+## 22. Current limitations
 
 - Single local user; no accounts, authentication, or per-user authorization.
 - NGN only; the schema cannot safely mix currencies.
@@ -1145,12 +1317,49 @@ not prove the absence of every bug, production performance, or security readines
   target, writes selected rows in memory as one array, and has no matching JSON
   import. `amount_ngn` is intentionally a string rather than a JSON number.
 - A valid confirmed deletion is immediate and has no undo or audit record.
+- Built-in help is a concise terminal reference, not shell completion, a manual
+  page, translated documentation, or an interactive tutorial. Line wrapping can
+  vary between Python versions even when the documented phrases stay the same.
 - No API, browser interface, PostgreSQL, Docker, monitoring, or cloud deployment.
 - No measured production users, reliability, load, or business impact.
 
 These are scope boundaries, not hidden completed features.
 
-## 22. Interview questions and honest answers
+## 23. Interview questions and honest answers
+
+**What was incomplete about the CLI help before Version 1.7.2?**
+Five working commands had no summary in the parent help, `--db` was unexplained,
+and several positional arguments appeared only as generic names such as `path` or
+`id`. A user had to read the README or source to infer their meaning.
+
+**What is the difference between `help=` and `description=` on a subparser?**
+The subparser's `help=` text appears beside its name in the parent command list.
+Its `description=` text appears on that command's own help screen. Supplying both
+makes discovery useful at both levels.
+
+**Why keep the filtered commands in a dictionary and one loop?**
+The commands share identical month and category flags, so one construction path
+prevents those options from drifting. The dictionary still gives each command a
+specific summary and preserves the existing visible command order.
+
+**Why does requesting help raise `SystemExit`?**
+`argparse` treats help as a terminal action: it prints the requested screen and
+ends the command. Exit code 0 means that action succeeded; parsing errors use a
+nonzero status, normally 2.
+
+**Why test that the help database path does not exist afterward?**
+The absence of the file proves more than the text alone. It confirms help stops
+inside argument parsing before `ExpenseStore` initializes SQLite, making help a
+read-only operation with no application-state side effect.
+
+**Why not compare the entire help screen in one exact assertion?**
+Exact snapshots are brittle because whitespace and line wrapping can vary. The
+tests check the public phrases, exit code, and side-effect boundary while leaving
+irrelevant formatting flexible.
+
+**Did this milestone change expense behavior?**
+No. Add, query, update, import, export, backup, and delete execution paths are
+unchanged. This is a usability and regression-evidence milestone in the CLI layer.
 
 **What was the Version 1.7.1 bug?**
 An export destination could be the live SQLite file. Opening that path in write
@@ -1375,7 +1584,7 @@ and API integration tests. Those features are not implemented here.
 Development used AI assistance. A truthful answer should distinguish generated or
 assisted implementation from the code personally studied, changed, and tested.
 
-## 23. Hands-on exercises
+## 24. Hands-on exercises
 
 Do these locally; reading alone is not practical mastery.
 
@@ -1468,10 +1677,28 @@ file, and explain why validation must run before write mode opens a destination.
 Finally, trace the values of `same_resolved_path` and `same_existing_file` for
 the safe and rejected destinations.
 
-## 24. Readiness check
+### Exercise N — Trace help before storage
 
-You understand Version 1.7.1 when you can reproduce the former risk only in a
-disposable database; explain truncation by write mode; trace an unsafe export
-through `distinct_destination()`; distinguish resolved path equality from
-existing-file identity; prove a rejected command preserves the row; complete a
-normal export to a separate path; and return all 32 tests to green.
+Before running anything, predict where each phrase comes from in these two
+screens:
+
+```sh
+python -m expense_tracker --db help-only.db --help
+python -m expense_tracker --db help-only.db export-json --help
+```
+
+Run both commands, record their exit status, and confirm `help-only.db` was not
+created. Explain the difference between the `help=` and `description=` arguments,
+then point to the exact line where normal execution would construct
+`ExpenseStore`. Temporarily remove the `list` command's dictionary description,
+run the focused top-level help test, explain the failure, restore the text, and
+return all 34 tests to green.
+
+## 25. Readiness check
+
+You understand Version 1.7.2 when you can identify the parent and subcommand help
+metadata; explain the difference between `help=` and `description=`; trace both
+help paths through `parse_args()` and `SystemExit(0)`; prove neither path creates
+the supplied database; explain why the tests assert meaningful phrases instead
+of an exact whitespace snapshot; complete Exercise N; and return all 34 tests to
+green.
