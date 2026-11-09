@@ -90,6 +90,12 @@ All amounts use NGN; currencies cannot be mixed.
 python -m unittest discover -s tests -v
 ```
 
+The workflow in `.github/workflows/tests.yml` runs this same command on Windows
+and Linux with Python 3.10 and 3.12 after pushes and pull requests. Once the
+workflow is published, results appear in the repository's Actions tab. It can
+also be started manually there. This checks the code; it does not deploy the app.
+See [the automated-testing exercise](docs/AUTOMATED_TESTS.md) for an explanation.
+
 The current suite contains 34 tests. It uses temporary databases and covers
 persistence, exact money, invalid input, category and note length boundaries,
 month/category filters and totals, single-record lookup, partial updates, rejected
